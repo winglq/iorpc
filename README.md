@@ -8,32 +8,32 @@ Simple and fast golang RPC library for zero-copy IO between filesystem and netwo
 Server:
 ```go
 s := &iorpc.Server{
-	// Accept clients on this TCP address.
-	Addr: ":12345",
+    // Accept clients on this TCP address.
+    Addr: ":12345",
 
-	// File server - send file to client
-	Handler: func(clientAddr string, request iorpc.Request) (*iorpc.Response, error) {
-		file, err := os.OpenFile("data", os.O_RDONLY, 0)
-		if err != nil {
-			return nil, err
-		}
-    stat, err := file.Stat()
-    if err != nil {
-      return nil, err
-    }
-    return &iorpc.Response{Size: stat.Size(), Body: file}, nil
-	},
+    // File server - send file to client
+    Handler: func(clientAddr string, request iorpc.Request) (*iorpc.Response, error) {
+        file, err := os.OpenFile("data", os.O_RDONLY, 0)
+        if err != nil {
+            return nil, err
+        }
+        stat, err := file.Stat()
+        if err != nil {
+        return nil, err
+        }
+        return &iorpc.Response{Size: stat.Size(), Body: file}, nil
+    },
 }
 if err := s.Serve(); err != nil {
-	log.Fatalf("Cannot start rpc server: %s", err)
+    log.Fatalf("Cannot start rpc server: %s", err)
 }
 ```
 
 Client:
 ```go
 c := &iorpc.Client{
-	// TCP address of the server.
-	Addr: "rpc.server.addr:12345",
+    // TCP address of the server.
+    Addr: "rpc.server.addr:12345",
 }
 c.Start()
 
@@ -41,7 +41,7 @@ c.Start()
 // i.e. it is safe to call them from multiple concurrently running goroutines.
 resp, err := c.Call(iorpc.Request{})
 if err != nil {
-	log.Fatalf("Error when sending request to server: %s", err)
+    log.Fatalf("Error when sending request to server: %s", err)
 }
 defer resp.Body.Close()
 
