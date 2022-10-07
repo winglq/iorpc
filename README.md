@@ -19,7 +19,7 @@ s := &iorpc.Server{
         }
         stat, err := file.Stat()
         if err != nil {
-        return nil, err
+            return nil, err
         }
         return &iorpc.Response{Size: stat.Size(), Body: file}, nil
     },
@@ -47,7 +47,7 @@ defer resp.Body.Close()
 
 file, err := os.Open("localfile")
 if err != nil {
-  log.Fatalf("Error when open ", err)
+    log.Fatalf("Error when open ", err)
 }
 defer file.Close()
 
