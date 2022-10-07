@@ -11,4 +11,4 @@ Gorpc has the following features:
   - Provides ability to use arbitrary underlying transport.
     By default TCP is used, but TLS and UNIX sockets are already available.
 */
-package gorpc
+package iorpc
