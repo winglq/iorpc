@@ -1,7 +1,6 @@
 package iorpc
 
 import (
-	"io"
 	"sync"
 	"time"
 )
@@ -22,11 +21,17 @@ type ConnStats struct {
 	//     avgRPCTtime = RPCTime / RPCCalls
 	RPCTime uint64
 
-	// The number of bytes written to the underlying connections.
-	BytesWritten uint64
+	// The number of bytes of body written to the underlying connection.
+	BodyWritten uint64
 
-	// The number of bytes read from the underlying connections.
-	BytesRead uint64
+	// The number of bytes of body read from the underlying connection.
+	BodyRead uint64
+
+	// The number of bytes written of head (the start line, error and headers) to the underlying connection.
+	HeadWritten uint64
+
+	// The number of bytes of head (start line and headers) read from the underlying connection.
+	HeadRead uint64
 
 	// The number of Read() calls.
 	ReadCalls uint64
@@ -69,7 +74,23 @@ func (cs *ConnStats) AvgRPCTime() time.Duration {
 // Use stats returned from ConnStats.Snapshot() on live Client and / or Server,
 // since the original stats can be updated by concurrently running goroutines.
 func (cs *ConnStats) AvgRPCBytes() (send float64, recv float64) {
-	return float64(cs.BytesWritten) / float64(cs.RPCCalls), float64(cs.BytesRead) / float64(cs.RPCCalls)
+	return float64(cs.HeadWritten+cs.BodyWritten) / float64(cs.RPCCalls), float64(cs.HeadRead+cs.BodyRead) / float64(cs.RPCCalls)
+}
+
+// AvgRPCHeadBytes returns the average bytes of header sent / received per RPC.
+//
+// Use stats returned from ConnStats.Snapshot() on live Client and / or Server,
+// since the original stats can be updated by concurrently running goroutines.
+func (cs *ConnStats) AvgRPCHeadBytes() (send float64, recv float64) {
+	return float64(cs.HeadWritten) / float64(cs.RPCCalls), float64(cs.HeadRead) / float64(cs.RPCCalls)
+}
+
+// AvgRPCBodyBytes returns the average bytes of body sent / received per RPC.
+//
+// Use stats returned from ConnStats.Snapshot() on live Client and / or Server,
+// since the original stats can be updated by concurrently running goroutines.
+func (cs *ConnStats) AvgRPCBodyBytes() (send float64, recv float64) {
+	return float64(cs.BodyWritten) / float64(cs.RPCCalls), float64(cs.BodyRead) / float64(cs.RPCCalls)
 }
 
 // AvgRPCCalls returns the average number of write() / read() syscalls per PRC.
@@ -78,48 +99,4 @@ func (cs *ConnStats) AvgRPCBytes() (send float64, recv float64) {
 // since the original stats can be updated by concurrently running goroutines.
 func (cs *ConnStats) AvgRPCCalls() (write float64, read float64) {
 	return float64(cs.WriteCalls) / float64(cs.RPCCalls), float64(cs.ReadCalls) / float64(cs.RPCCalls)
-}
-
-type writerCounter struct {
-	w  io.Writer
-	cs *ConnStats
-}
-
-type readerCounter struct {
-	r  io.Reader
-	cs *ConnStats
-}
-
-func newWriterCounter(w io.Writer, cs *ConnStats) io.Writer {
-	return &writerCounter{
-		w:  w,
-		cs: cs,
-	}
-}
-
-func newReaderCounter(r io.Reader, cs *ConnStats) io.Reader {
-	return &readerCounter{
-		r:  r,
-		cs: cs,
-	}
-}
-
-func (w *writerCounter) Write(p []byte) (int, error) {
-	n, err := w.w.Write(p)
-	w.cs.incWriteCalls()
-	if err != nil {
-		w.cs.incWriteErrors()
-	}
-	w.cs.addBytesWritten(uint64(n))
-	return n, err
-}
-
-func (r *readerCounter) Read(p []byte) (int, error) {
-	n, err := r.r.Read(p)
-	r.cs.incReadCalls()
-	if err != nil {
-		r.cs.incReadErrors()
-	}
-	r.cs.addBytesRead(uint64(n))
-	return n, err
 }

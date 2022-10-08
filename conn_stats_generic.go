@@ -15,8 +15,10 @@ func (cs *ConnStats) Snapshot() *ConnStats {
 	return &ConnStats{
 		RPCCalls:     atomic.LoadUint64(&cs.RPCCalls),
 		RPCTime:      atomic.LoadUint64(&cs.RPCTime),
-		BytesWritten: atomic.LoadUint64(&cs.BytesWritten),
-		BytesRead:    atomic.LoadUint64(&cs.BytesRead),
+		HeadWritten:  atomic.LoadUint64(&cs.HeadWritten),
+		BodyWritten:  atomic.LoadUint64(&cs.BodyWritten),
+		HeadRead:     atomic.LoadUint64(&cs.HeadRead),
+		BodyRead:     atomic.LoadUint64(&cs.BodyRead),
 		ReadCalls:    atomic.LoadUint64(&cs.ReadCalls),
 		ReadErrors:   atomic.LoadUint64(&cs.ReadErrors),
 		WriteCalls:   atomic.LoadUint64(&cs.WriteCalls),
@@ -32,8 +34,10 @@ func (cs *ConnStats) Snapshot() *ConnStats {
 func (cs *ConnStats) Reset() {
 	atomic.StoreUint64(&cs.RPCCalls, 0)
 	atomic.StoreUint64(&cs.RPCTime, 0)
-	atomic.StoreUint64(&cs.BytesWritten, 0)
-	atomic.StoreUint64(&cs.BytesRead, 0)
+	atomic.StoreUint64(&cs.HeadWritten, 0)
+	atomic.StoreUint64(&cs.BodyWritten, 0)
+	atomic.StoreUint64(&cs.HeadRead, 0)
+	atomic.StoreUint64(&cs.BodyRead, 0)
 	atomic.StoreUint64(&cs.WriteCalls, 0)
 	atomic.StoreUint64(&cs.WriteErrors, 0)
 	atomic.StoreUint64(&cs.ReadCalls, 0)
@@ -52,12 +56,20 @@ func (cs *ConnStats) incRPCTime(dt uint64) {
 	atomic.AddUint64(&cs.RPCTime, dt)
 }
 
-func (cs *ConnStats) addBytesWritten(n uint64) {
-	atomic.AddUint64(&cs.BytesWritten, n)
+func (cs *ConnStats) addHeadWritten(n uint64) {
+	atomic.AddUint64(&cs.HeadWritten, n)
 }
 
-func (cs *ConnStats) addBytesRead(n uint64) {
-	atomic.AddUint64(&cs.BytesRead, n)
+func (cs *ConnStats) addHeadRead(n uint64) {
+	atomic.AddUint64(&cs.HeadRead, n)
+}
+
+func (cs *ConnStats) addBodyWritten(n uint64) {
+	atomic.AddUint64(&cs.BodyWritten, n)
+}
+
+func (cs *ConnStats) addBodyRead(n uint64) {
+	atomic.AddUint64(&cs.BodyRead, n)
 }
 
 func (cs *ConnStats) incReadCalls() {

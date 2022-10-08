@@ -87,7 +87,7 @@ func (e *messageEncoder) encode(body io.ReadCloser) error {
 			e.stat.incWriteErrors()
 			return err
 		}
-		e.stat.addBytesWritten(uint64(n))
+		e.stat.addHeadWritten(uint64(n))
 	}
 
 	if body != nil {
@@ -97,7 +97,7 @@ func (e *messageEncoder) encode(body io.ReadCloser) error {
 			e.stat.incWriteErrors()
 			return err
 		}
-		e.stat.addBytesWritten(uint64(nc))
+		e.stat.addBodyWritten(uint64(nc))
 	}
 
 	e.stat.incWriteCalls()
@@ -122,6 +122,7 @@ func (e *messageEncoder) EncodeRequest(req wireRequest) error {
 		return err
 	}
 
+	e.stat.addHeadWritten(uint64(requestStartLineSize))
 	return e.encode(req.Body)
 }
 
@@ -146,13 +147,15 @@ func (e *messageEncoder) EncodeResponse(resp wireResponse) error {
 		return err
 	}
 
+	e.stat.addHeadWritten(uint64(responseStartLineSize))
+
 	if len(respErr) > 0 {
 		n, err := e.w.Write(respErr)
 		if err != nil {
 			e.stat.incWriteErrors()
 			return err
 		}
-		e.stat.addBytesWritten(uint64(n))
+		e.stat.addHeadWritten(uint64(n))
 	}
 
 	return e.encode(resp.Body)
@@ -200,7 +203,7 @@ func (d *messageDecoder) DecodeRequest(req *wireRequest) error {
 		d.stat.incReadErrors()
 		return err
 	}
-	d.stat.addBytesRead(uint64(requestStartLineSize))
+	d.stat.addHeadRead(uint64(requestStartLineSize))
 
 	req.ID = startLine.ID
 	req.Size = startLine.BodySize
@@ -211,7 +214,7 @@ func (d *messageDecoder) DecodeRequest(req *wireRequest) error {
 			d.stat.incReadErrors()
 			return err
 		}
-		d.stat.addBytesRead(uint64(startLine.HeaderSize))
+		d.stat.addHeadRead(uint64(startLine.HeaderSize))
 		if err := d.headerDecoder.Decode(&req.Headers); err != nil {
 			d.stat.incReadErrors()
 			return err
@@ -224,7 +227,7 @@ func (d *messageDecoder) DecodeRequest(req *wireRequest) error {
 		if err != nil {
 			return err
 		}
-		d.stat.addBytesRead(uint64(bytes))
+		d.stat.addBodyRead(uint64(bytes))
 		if d.closeBody {
 			buf.Close()
 		} else {
@@ -241,7 +244,7 @@ func (d *messageDecoder) DecodeResponse(resp *wireResponse) error {
 		d.stat.incReadErrors()
 		return err
 	}
-	d.stat.addBytesRead(uint64(responseStartLineSize))
+	d.stat.addHeadRead(uint64(responseStartLineSize))
 
 	resp.ID = startLine.ID
 	resp.Size = startLine.BodySize
@@ -252,7 +255,7 @@ func (d *messageDecoder) DecodeResponse(resp *wireResponse) error {
 			d.stat.incReadErrors()
 			return err
 		}
-		d.stat.addBytesRead(uint64(startLine.ErrorSize))
+		d.stat.addHeadRead(uint64(startLine.ErrorSize))
 		resp.Error = string(respErr)
 	}
 
@@ -262,7 +265,7 @@ func (d *messageDecoder) DecodeResponse(resp *wireResponse) error {
 			d.stat.incReadErrors()
 			return err
 		}
-		d.stat.addBytesRead(uint64(startLine.HeaderSize))
+		d.stat.addHeadRead(uint64(startLine.HeaderSize))
 		if err := d.headerDecoder.Decode(&resp.Headers); err != nil {
 			d.stat.incReadErrors()
 			return err
@@ -275,7 +278,7 @@ func (d *messageDecoder) DecodeResponse(resp *wireResponse) error {
 		if err != nil {
 			return err
 		}
-		d.stat.addBytesRead(uint64(bytes))
+		d.stat.addBodyRead(uint64(bytes))
 		if d.closeBody {
 			buf.Close()
 		} else {
