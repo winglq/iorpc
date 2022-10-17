@@ -254,6 +254,7 @@ func releaseAsyncResult(m *AsyncResult) {
 	m.Response.Body = nil
 	m.Error = nil
 	m.Done = nil
+	m.request.Service = 0
 	m.request.Size = 0
 	m.request.Headers = nil
 	m.request.Body = nil
@@ -826,6 +827,7 @@ func clientWriter(c *Client, w io.Writer, pendingRequests map[uint64]*AsyncResul
 			wr.ID = msgID
 		}
 
+		wr.Service = m.request.Service
 		wr.Headers = m.request.Headers
 		wr.Body = m.request.Body
 		wr.Size = m.request.Size

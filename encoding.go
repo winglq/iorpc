@@ -26,17 +26,19 @@ var (
 )
 
 type requestStartLine struct {
+	Service      uint32
 	HeaderSize   uint32
 	ID, BodySize uint64
 }
 
 type responseStartLine struct {
-	ErrorSize    uint16
+	ErrorSize    uint32
 	HeaderSize   uint32
 	ID, BodySize uint64
 }
 
 type wireRequest struct {
+	Service uint32
 	ID      uint64
 	Size    uint64
 	Headers map[string]any
@@ -115,6 +117,7 @@ func (e *messageEncoder) EncodeRequest(req wireRequest) error {
 
 	if err := binary.Write(e.w, binary.BigEndian, requestStartLine{
 		ID:         req.ID,
+		Service:    req.Service,
 		HeaderSize: uint32(e.headerBuffer.Len()),
 		BodySize:   req.Size,
 	}); err != nil {
@@ -139,7 +142,7 @@ func (e *messageEncoder) EncodeResponse(resp wireResponse) error {
 
 	if err := binary.Write(e.w, binary.BigEndian, responseStartLine{
 		ID:         resp.ID,
-		ErrorSize:  uint16(len(respErr)),
+		ErrorSize:  uint32(len(respErr)),
 		HeaderSize: uint32(e.headerBuffer.Len()),
 		BodySize:   resp.Size,
 	}); err != nil {
@@ -206,6 +209,7 @@ func (d *messageDecoder) DecodeRequest(req *wireRequest) error {
 	d.stat.addHeadRead(uint64(requestStartLineSize))
 
 	req.ID = startLine.ID
+	req.Service = startLine.Service
 	req.Size = startLine.BodySize
 
 	if startLine.HeaderSize > 0 {
