@@ -827,7 +827,7 @@ func clientWriter(c *Client, w io.Writer, pendingRequests map[uint64]*AsyncResul
 			wr.ID = msgID
 		}
 
-		wr.Service = m.request.Service
+		wr.Service = uint32(m.request.Service)
 		wr.Headers = m.request.Headers
 		wr.Body = m.request.Body
 		wr.Size = m.request.Size

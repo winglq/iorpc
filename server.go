@@ -10,7 +10,7 @@ import (
 )
 
 type Request struct {
-	Service uint32
+	Service Service
 	Size    uint64
 	Headers map[string]any
 	Body    io.ReadCloser
@@ -360,7 +360,7 @@ func serverReader(s *Server, r io.Reader, clientAddr string, responsesChan chan<
 		m := serverMessagePool.Get().(*serverMessage)
 		m.ID = wr.ID
 		m.Request = &Request{
-			Service: wr.Service,
+			Service: Service(wr.Service),
 			Size:    wr.Size,
 			Headers: wr.Headers,
 			Body:    wr.Body,
