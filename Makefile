@@ -22,3 +22,5 @@ bench-4-goprocs:
 bench-8-goprocs:
 	GOMAXPROCS=8 go test -test.bench=".*"
 
+fmt:
+	go fmt ./...

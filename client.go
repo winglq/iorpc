@@ -250,14 +250,12 @@ func acquireAsyncResult() *AsyncResult {
 var zeroTime time.Time
 
 func releaseAsyncResult(m *AsyncResult) {
-	m.Response.Size = 0
-	m.Response.Body = nil
+	m.Response.Body.Reset()
 	m.Error = nil
 	m.Done = nil
 	m.request.Service = 0
-	m.request.Size = 0
 	m.request.Headers = nil
-	m.request.Body = nil
+	m.request.Body.Reset()
 	m.t = zeroTime
 	m.done = nil
 	asyncResultPool.Put(m)
@@ -830,7 +828,6 @@ func clientWriter(c *Client, w io.Writer, pendingRequests map[uint64]*AsyncResul
 		wr.Service = uint32(m.request.Service)
 		wr.Headers = m.request.Headers
 		wr.Body = m.request.Body
-		wr.Size = m.request.Size
 		if m.done == nil {
 			c.Stats.incRPCCalls()
 			releaseAsyncResult(m)
@@ -840,7 +837,7 @@ func clientWriter(c *Client, w io.Writer, pendingRequests map[uint64]*AsyncResul
 			err = fmt.Errorf("gorpc.Client: [%s]. Cannot send request to wire: [%s]", c.Addr, err)
 			return
 		}
-		wr.Body = nil
+		wr.Body.Reset()
 	}
 }
 
@@ -880,12 +877,11 @@ func clientReader(c *Client, r io.Reader, pendingRequests map[uint64]*AsyncResul
 		atomic.AddUint32(&c.pendingRequestsCount, ^uint32(0))
 
 		m.Response = Response{
-			Size: wr.Size,
 			Body: wr.Body,
 		}
 
 		wr.ID = 0
-		wr.Body = nil
+		wr.Body.Reset()
 		if wr.Error != "" {
 			m.Error = &ClientError{
 				Server: true,

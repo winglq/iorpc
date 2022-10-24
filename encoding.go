@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"encoding/gob"
 	"io"
+
+	"github.com/pkg/errors"
 )
 
 // RegisterType registers the given type to send via rpc.
@@ -40,16 +42,14 @@ type responseStartLine struct {
 type wireRequest struct {
 	Service uint32
 	ID      uint64
-	Size    uint64
 	Headers map[string]any
-	Body    io.ReadCloser
+	Body    Body
 }
 
 type wireResponse struct {
 	ID      uint64
-	Size    uint64
 	Headers map[string]any
-	Body    io.ReadCloser
+	Body    Body
 	Error   string
 }
 
@@ -82,7 +82,7 @@ func (e *messageEncoder) Flush() error {
 	return nil
 }
 
-func (e *messageEncoder) encode(body io.ReadCloser) error {
+func (e *messageEncoder) encode(body *Body) error {
 	if e.headerBuffer.Len() > 0 {
 		n, err := e.w.Write(e.headerBuffer.Bytes())
 		if err != nil {
@@ -94,7 +94,7 @@ func (e *messageEncoder) encode(body io.ReadCloser) error {
 
 	if body != nil {
 		defer body.Close()
-		nc, err := io.Copy(e.w, body)
+		nc, err := io.CopyN(e.w, body.Reader, int64(body.Size))
 		if err != nil {
 			e.stat.incWriteErrors()
 			return err
@@ -119,14 +119,14 @@ func (e *messageEncoder) EncodeRequest(req wireRequest) error {
 		ID:         req.ID,
 		Service:    req.Service,
 		HeaderSize: uint32(e.headerBuffer.Len()),
-		BodySize:   req.Size,
+		BodySize:   req.Body.Size,
 	}); err != nil {
 		e.stat.incWriteErrors()
 		return err
 	}
 
 	e.stat.addHeadWritten(uint64(requestStartLineSize))
-	return e.encode(req.Body)
+	return e.encode(&req.Body)
 }
 
 func (e *messageEncoder) EncodeResponse(resp wireResponse) error {
@@ -144,7 +144,7 @@ func (e *messageEncoder) EncodeResponse(resp wireResponse) error {
 		ID:         resp.ID,
 		ErrorSize:  uint32(len(respErr)),
 		HeaderSize: uint32(e.headerBuffer.Len()),
-		BodySize:   resp.Size,
+		BodySize:   resp.Body.Size,
 	}); err != nil {
 		e.stat.incWriteErrors()
 		return err
@@ -161,7 +161,7 @@ func (e *messageEncoder) EncodeResponse(resp wireResponse) error {
 		e.stat.addHeadWritten(uint64(n))
 	}
 
-	return e.encode(resp.Body)
+	return e.encode(&resp.Body)
 }
 
 func newMessageEncoder(w io.Writer, s *ConnStats) *messageEncoder {
@@ -210,7 +210,7 @@ func (d *messageDecoder) DecodeRequest(req *wireRequest) error {
 
 	req.ID = startLine.ID
 	req.Service = startLine.Service
-	req.Size = startLine.BodySize
+	req.Body.Size = startLine.BodySize
 
 	if startLine.HeaderSize > 0 {
 		d.headerBuffer.Reset()
@@ -225,9 +225,9 @@ func (d *messageDecoder) DecodeRequest(req *wireRequest) error {
 		}
 	}
 
-	if req.Size > 0 {
+	if req.Body.Size > 0 {
 		buf := bufferPool.Get().(*Buffer)
-		bytes, err := buf.ReadFrom(io.LimitReader(d.r, int64(req.Size)))
+		bytes, err := buf.ReadFrom(io.LimitReader(d.r, int64(req.Body.Size)))
 		if err != nil {
 			return err
 		}
@@ -235,7 +235,7 @@ func (d *messageDecoder) DecodeRequest(req *wireRequest) error {
 		if d.closeBody {
 			buf.Close()
 		} else {
-			req.Body = buf
+			req.Body.Reader = buf
 		}
 	}
 	d.stat.incReadCalls()
@@ -251,13 +251,13 @@ func (d *messageDecoder) DecodeResponse(resp *wireResponse) error {
 	d.stat.addHeadRead(uint64(responseStartLineSize))
 
 	resp.ID = startLine.ID
-	resp.Size = startLine.BodySize
+	resp.Body.Size = startLine.BodySize
 
 	if startLine.ErrorSize > 0 {
 		respErr := make([]byte, startLine.ErrorSize)
 		if _, err := io.ReadFull(d.r, respErr); err != nil {
 			d.stat.incReadErrors()
-			return err
+			return errors.Wrapf(err, "read response error: size(%d)", startLine.ErrorSize)
 		}
 		d.stat.addHeadRead(uint64(startLine.ErrorSize))
 		resp.Error = string(respErr)
@@ -267,7 +267,7 @@ func (d *messageDecoder) DecodeResponse(resp *wireResponse) error {
 		d.headerBuffer.Reset()
 		if _, err := io.CopyN(d.headerBuffer, d.r, int64(startLine.HeaderSize)); err != nil {
 			d.stat.incReadErrors()
-			return err
+			return errors.Wrapf(err, "read response headers: size(%d)", startLine.HeaderSize)
 		}
 		d.stat.addHeadRead(uint64(startLine.HeaderSize))
 		if err := d.headerDecoder.Decode(&resp.Headers); err != nil {
@@ -276,17 +276,17 @@ func (d *messageDecoder) DecodeResponse(resp *wireResponse) error {
 		}
 	}
 
-	if resp.Size > 0 {
+	if resp.Body.Size > 0 {
 		buf := bufferPool.Get().(*Buffer)
-		bytes, err := buf.ReadFrom(io.LimitReader(d.r, int64(resp.Size)))
+		bytes, err := io.CopyN(buf, d.r, int64(resp.Body.Size))
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "read response body: size(%d)", resp.Body.Size)
 		}
 		d.stat.addBodyRead(uint64(bytes))
 		if d.closeBody {
 			buf.Close()
 		} else {
-			resp.Body = buf
+			resp.Body.Reader = buf
 		}
 	}
 	d.stat.incReadCalls()

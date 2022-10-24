@@ -9,17 +9,20 @@ import (
 	"time"
 )
 
+type Body struct {
+	Offset, Size uint64
+	Reader       io.ReadCloser
+}
+
 type Request struct {
 	Service Service
-	Size    uint64
 	Headers map[string]any
-	Body    io.ReadCloser
+	Body    Body
 }
 
 type Response struct {
-	Size    uint64
 	Headers map[string]any
-	Body    io.ReadCloser
+	Body    Body
 }
 
 // HandlerFunc is a server handler function.
@@ -195,6 +198,17 @@ func (s *Server) Serve() error {
 	return nil
 }
 
+func (b *Body) Reset() {
+	b.Offset, b.Size, b.Reader = 0, 0, nil
+}
+
+func (b *Body) Close() error {
+	if b.Reader != nil {
+		return b.Reader.Close()
+	}
+	return nil
+}
+
 func serverHandler(s *Server, workersCh chan struct{}) {
 	defer s.stopWg.Done()
 
@@ -361,7 +375,6 @@ func serverReader(s *Server, r io.Reader, clientAddr string, responsesChan chan<
 		m.ID = wr.ID
 		m.Request = &Request{
 			Service: Service(wr.Service),
-			Size:    wr.Size,
 			Headers: wr.Headers,
 			Body:    wr.Body,
 		}
@@ -369,9 +382,8 @@ func serverReader(s *Server, r io.Reader, clientAddr string, responsesChan chan<
 
 		wr.ID = 0
 		wr.Service = 0
-		wr.Size = 0
 		wr.Headers = nil
-		wr.Body = nil
+		wr.Body.Reset()
 
 		select {
 		case workersCh <- struct{}{}:
@@ -481,7 +493,6 @@ func serverWriter(s *Server, w io.Writer, clientAddr string, responsesChan <-cha
 		wr.Error = m.Error
 		if m.Response != nil {
 			wr.Body = m.Response.Body
-			wr.Size = m.Response.Size
 			wr.Headers = m.Response.Headers
 		}
 
@@ -493,8 +504,7 @@ func serverWriter(s *Server, w io.Writer, clientAddr string, responsesChan <-cha
 			s.LogError("gorpc.Server: [%s]->[%s]. Cannot send response to wire: [%s]", clientAddr, s.Addr, err)
 			return
 		}
-		wr.Body = nil
-		wr.Size = 0
+		wr.Body.Reset()
 		wr.Headers = nil
 
 		s.Stats.incRPCCalls()
