@@ -1,7 +1,6 @@
 package splice
 
 import (
-	"runtime"
 	"sync"
 )
 
@@ -18,12 +17,7 @@ func ClearSplicePool() {
 }
 
 func Get() (*Pair, error) {
-	pair, err := splicePool.get()
-	if err != nil {
-		return nil, err
-	}
-	runtime.SetFinalizer(pair, func(p *Pair) { Done(p) })
-	return pair, nil
+	return splicePool.get()
 }
 
 func Total() int {
