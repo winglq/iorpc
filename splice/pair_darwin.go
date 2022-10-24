@@ -14,3 +14,7 @@ func (p *Pair) WriteTo(fd uintptr, n int) (int, error) {
 	panic("not implemented")
 	return 0, nil
 }
+
+func (p *Pair) discard() {
+	panic("not implemented")
+}
