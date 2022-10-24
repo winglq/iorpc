@@ -93,6 +93,55 @@ func (e *messageEncoder) encode(body *Body) error {
 	}
 
 	if body.Reader != nil {
+		// 	spliced, err := func() (bool, error) {
+		// 		fileslice, ok := body.(*FileSlice)
+		// 		if !ok {
+		// 			return false, nil
+		// 		}
+		// 		syscallConn, ok := e.w.(syscall.Conn)
+		// 		if !ok {
+		// 			return false, nil
+		// 		}
+		// 		rawConn, err := syscallConn.SyscallConn()
+		// 		if err != nil {
+		// 			return false, nil
+		// 		}
+		// 		pair, err := splice.Get()
+		// 		if err != nil {
+		// 			return false, nil
+		// 		}
+		// 		defer splice.Done(pair)
+		// 		for {
+		// 			written := 0
+		// 			_, err := pair.LoadFromAt(fileslice.Fd(), int(fileslice.size), int64(fileslice.offset))
+		// 			if err != nil {
+		// 				return false, nil
+		// 			}
+		// 			var writeError error
+		// 			err = rawConn.Write(func(fd uintptr) (done bool) {
+		// 				var n int
+		// 				n, writeError = pair.WriteTo(fd, int(fileslice.size)-written)
+		// 				if err != nil {
+		// 					log.Printf("pair.WriteTo() failed: %v", err)
+		// 					return true
+		// 				}
+		// 				written += n
+		// 				return written == int(fileslice.size)
+		// 			})
+		// 			if err != nil {
+		// 				return false, err
+		// 			}
+		// 			if writeError != nil {
+		// 				return false, err
+		// 			}
+		// 		}
+		// 	}()
+		// 	if err != nil {
+		// 		return err
+		// 	}
+		// 	if spliced {
+		// 		return nil
+		// 	}
 		defer body.Close()
 		nc, err := io.CopyN(e.w, body.Reader, int64(body.Size))
 		if err != nil {
