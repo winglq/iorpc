@@ -92,7 +92,7 @@ func (e *messageEncoder) encode(body *Body) error {
 		e.stat.addHeadWritten(uint64(n))
 	}
 
-	if body != nil {
+	if body.Reader != nil {
 		defer body.Close()
 		nc, err := io.CopyN(e.w, body.Reader, int64(body.Size))
 		if err != nil {

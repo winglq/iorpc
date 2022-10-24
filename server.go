@@ -9,11 +9,6 @@ import (
 	"time"
 )
 
-type Body struct {
-	Offset, Size uint64
-	Reader       io.ReadCloser
-}
-
 type Request struct {
 	Service Service
 	Headers map[string]any
@@ -195,17 +190,6 @@ func (s *Server) Serve() error {
 		return err
 	}
 	s.stopWg.Wait()
-	return nil
-}
-
-func (b *Body) Reset() {
-	b.Offset, b.Size, b.Reader = 0, 0, nil
-}
-
-func (b *Body) Close() error {
-	if b.Reader != nil {
-		return b.Reader.Close()
-	}
 	return nil
 }
 
