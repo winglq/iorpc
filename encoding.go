@@ -212,7 +212,27 @@ func (d *messageDecoder) Close() error {
 	return d.headerBuffer.Close()
 }
 
+func (d *messageDecoder) spliceBody(size int64) (IsPipe, error) {
+	if size == 0 {
+		return nil, nil
+	}
+
+	r, ok := d.r.(IsConn)
+	if !ok {
+		return nil, nil
+	}
+
+	return PipeConn(r, int(size))
+}
+
 func (d *messageDecoder) decodeBody(size int64) (io.ReadCloser, error) {
+	p, err := d.spliceBody(size)
+	if err != nil {
+		return nil, err
+	}
+	if p != nil {
+		return p, nil
+	}
 	buf := bufferPool.Get().(*Buffer)
 	bytes, err := buf.ReadFrom(io.LimitReader(d.r, int64(size)))
 	if err != nil {

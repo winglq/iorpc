@@ -31,7 +31,7 @@ type IsConn interface {
 }
 
 type IsPipe interface {
-	io.Closer
+	io.ReadCloser
 	ReadFd() (fd uintptr)
 	WriteTo(fd uintptr, n int) (int, error)
 }
