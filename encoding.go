@@ -7,6 +7,7 @@ import (
 	"log"
 	"syscall"
 
+	"github.com/hexilee/iorpc/splice"
 	"github.com/pkg/errors"
 )
 
@@ -107,53 +108,43 @@ func (e *messageEncoder) encode(body *Body) error {
 				return false, nil
 			}
 
-			fileRawConn, err := file.File().SyscallConn()
-			if err != nil {
-				return false, nil
-			}
-
 			dstRawConn, err := syscallConn.SyscallConn()
 			if err != nil {
 				return false, nil
 			}
-			// pair, err := splice.Get()
-			// if err != nil {
-			// 	return false, nil
-			// }
-			// pair.Grow(int(body.Size))
-			// defer splice.Done(pair)
-			// _, err = pair.LoadFromAt(file.File().Fd(), int(body.Size), int64(body.Offset))
-			// if err != nil {
-			// 	return false, nil
-			// }
+			pair, err := splice.Get()
+			if err != nil {
+				return false, nil
+			}
+			pair.Grow(int(body.Size))
+			defer splice.Done(pair)
+			_, err = pair.LoadFromAt(file.File().Fd(), int(body.Size), int64(body.Offset))
+			if err != nil {
+				return false, nil
+			}
 
-			fileRawConn.Read(func(fd uintptr) (done bool) {
-				written := 0
-				var writeError error
-				err = dstRawConn.Write(func(fd uintptr) (done bool) {
-					var n int
-					// n, writeError = pair.WriteTo(fd, int(body.Size)-written)
-					offset := int64(body.Offset) + int64(written)
-					n, writeError = syscall.Sendfile(int(fd), int(file.File().Fd()), &offset, int(body.Size)-written)
-					written += n
-					if written == int(body.Size) {
-						return true
-					}
-					if err != nil {
-						if writeError == syscall.EAGAIN || writeError == syscall.EINTR {
-							// write again
-							return false
-						}
-						log.Printf("sendfile failed: %v", err)
-						return true
-					}
-					return false
-				})
-				if err == nil {
-					err = writeError
+			written := 0
+			var writeError error
+			err = dstRawConn.Write(func(fd uintptr) (done bool) {
+				var n int
+				n, writeError = pair.WriteTo(fd, int(body.Size)-written)
+				written += n
+				if written == int(body.Size) {
+					return true
 				}
-				return true
+				if err != nil {
+					if writeError == syscall.EAGAIN || writeError == syscall.EINTR {
+						// write again
+						return false
+					}
+					log.Printf("sendfile failed: %v", err)
+					return true
+				}
+				return false
 			})
+			if err == nil {
+				err = writeError
+			}
 			return true, err
 		}()
 		if err != nil {
