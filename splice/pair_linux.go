@@ -6,18 +6,18 @@ import (
 	"syscall"
 )
 
-func (p *Pair) LoadFromAt(fd uintptr, sz int, off int64) (int, error) {
+func (p *Pair) LoadFromAt(fd uintptr, sz int, off *int64) (int, error) {
 	if sz > p.size {
 		return 0, fmt.Errorf("LoadFrom: not enough space %d, %d",
 			sz, p.size)
 	}
 
-	n, err := syscall.Splice(int(fd), &off, p.w, nil, sz, 0)
+	n, err := syscall.Splice(int(fd), off, p.w, nil, sz, 0)
 	return int(n), err
 }
 
 func (p *Pair) LoadFrom(fd uintptr, sz int) (int, error) {
-	return p.LoadFromAt(fd, sz, 0)
+	return p.LoadFromAt(fd, sz, nil)
 }
 
 func (p *Pair) WriteTo(fd uintptr, n int) (int, error) {

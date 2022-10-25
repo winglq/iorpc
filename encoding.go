@@ -3,7 +3,6 @@ package iorpc
 import (
 	"encoding/binary"
 	"encoding/gob"
-	"fmt"
 	"io"
 
 	"github.com/pkg/errors"
@@ -96,14 +95,16 @@ func (e *messageEncoder) encode(body *Body) error {
 	if body.Size != 0 && body.Reader != nil {
 		defer body.Close()
 		spliced, err := body.spliceTo(e.w)
-		if spliced {
-			return err
-		}
 		if err != nil {
 			// TODO: deal with error
-			fmt.Println(err)
 			err = nil
 		}
+		if spliced {
+			e.stat.addBodyWritten(body.Size)
+			e.stat.incWriteCalls()
+			return nil
+		}
+
 		// fallback to io.Copy when not spliced
 		nc, err := io.CopyN(e.w, body.Reader, int64(body.Size))
 		if err != nil {
@@ -211,6 +212,21 @@ func (d *messageDecoder) Close() error {
 	return d.headerBuffer.Close()
 }
 
+func (d *messageDecoder) decodeBody(size int64) (io.ReadCloser, error) {
+	buf := bufferPool.Get().(*Buffer)
+	bytes, err := buf.ReadFrom(io.LimitReader(d.r, int64(size)))
+	if err != nil {
+		return nil, err
+	}
+	d.stat.addBodyRead(uint64(bytes))
+	if d.closeBody {
+		buf.Close()
+		return nil, nil
+	} else {
+		return buf, nil
+	}
+}
+
 func (d *messageDecoder) DecodeRequest(req *wireRequest) error {
 	var startLine requestStartLine
 	if err := binary.Read(d.r, binary.BigEndian, &startLine); err != nil {
@@ -237,17 +253,11 @@ func (d *messageDecoder) DecodeRequest(req *wireRequest) error {
 	}
 
 	if req.Body.Size > 0 {
-		buf := bufferPool.Get().(*Buffer)
-		bytes, err := buf.ReadFrom(io.LimitReader(d.r, int64(req.Body.Size)))
+		buf, err := d.decodeBody(int64(req.Body.Size))
 		if err != nil {
 			return err
 		}
-		d.stat.addBodyRead(uint64(bytes))
-		if d.closeBody {
-			buf.Close()
-		} else {
-			req.Body.Reader = buf
-		}
+		req.Body.Reader = buf
 	}
 	d.stat.incReadCalls()
 	return nil
@@ -288,17 +298,11 @@ func (d *messageDecoder) DecodeResponse(resp *wireResponse) error {
 	}
 
 	if resp.Body.Size > 0 {
-		buf := bufferPool.Get().(*Buffer)
-		bytes, err := io.CopyN(buf, d.r, int64(resp.Body.Size))
+		buf, err := d.decodeBody(int64(resp.Body.Size))
 		if err != nil {
-			return errors.Wrapf(err, "read response body: size(%d)", resp.Body.Size)
+			return err
 		}
-		d.stat.addBodyRead(uint64(bytes))
-		if d.closeBody {
-			buf.Close()
-		} else {
-			resp.Body.Reader = buf
-		}
+		resp.Body.Reader = buf
 	}
 	d.stat.incReadCalls()
 	return nil

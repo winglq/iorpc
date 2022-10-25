@@ -3,7 +3,6 @@ package iorpc
 import (
 	"bytes"
 	"io"
-	"net"
 	"os"
 	"syscall"
 
@@ -28,12 +27,12 @@ type IsFile interface {
 
 type IsConn interface {
 	io.Closer
-	Conn() net.Conn
-	SyscallConn() (c syscall.Conn, err error)
+	syscall.Conn
 }
 
 type IsPipe interface {
 	io.Closer
+	ReadFd() (fd uintptr)
 	WriteTo(fd uintptr, n int) (int, error)
 }
 
@@ -62,7 +61,7 @@ func PipeFile(r IsFile, offset int64, size int) (IsPipe, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "grow pipe pair")
 	}
-	_, err = pair.LoadFromAt(r.File().Fd(), size, offset)
+	_, err = pair.LoadFromAt(r.File().Fd(), size, &offset)
 	if err != nil {
 		return nil, errors.Wrap(err, "pair load file")
 	}
@@ -70,11 +69,51 @@ func PipeFile(r IsFile, offset int64, size int) (IsPipe, error) {
 }
 
 func PipeConn(r IsConn, size int) (IsPipe, error) {
-	return nil, errors.New("pipe conn is unsupported")
+	pair, err := splice.Get()
+	if err != nil {
+		return nil, errors.Wrap(err, "get pipe pair")
+	}
+	err = pair.Grow(size)
+	if err != nil {
+		return nil, errors.Wrap(err, "grow pipe pair")
+	}
+
+	rawConn, err := r.SyscallConn()
+	if err != nil {
+		return nil, errors.Wrap(err, "get raw conn")
+	}
+
+	loaded := 0
+	var loadError error
+	err = rawConn.Read(func(fd uintptr) (done bool) {
+		var n int
+		n, loadError = pair.LoadFrom(fd, size-loaded)
+		if loadError == syscall.EAGAIN || loadError == syscall.EINTR {
+			loadError = nil
+			return false
+		}
+		if loadError != nil {
+			return true
+		}
+		loaded += n
+		return loaded == size
+	})
+
+	if err == nil {
+		err = loadError
+	}
+	if err != nil {
+		return nil, errors.Wrap(err, "pair load file")
+	}
+	return &Pipe{pair: pair}, nil
 }
 
 func PipeBuffer(r IsBuffer, offset int64, size int) (IsPipe, error) {
 	return nil, errors.New("pipe buffer is unsupported")
+}
+
+func (p *Pipe) ReadFd() uintptr {
+	return p.pair.ReadFd()
 }
 
 func (p *Pipe) WriteTo(fd uintptr, n int) (int, error) {
