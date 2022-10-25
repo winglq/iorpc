@@ -4,9 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/gob"
 	"io"
-	"syscall"
 
-	"github.com/hexilee/iorpc/splice"
 	"github.com/pkg/errors"
 )
 
@@ -96,58 +94,9 @@ func (e *messageEncoder) encode(body *Body) error {
 
 	if body.Reader != nil {
 		defer body.Close()
-		spliced, err := func() (bool, error) {
-			file, ok := body.Reader.(IsFile)
-			if !ok {
-				return false, nil
-			}
-
-			syscallConn, ok := e.w.(syscall.Conn)
-			if !ok {
-				return false, nil
-			}
-
-			dstRawConn, err := syscallConn.SyscallConn()
-			if err != nil {
-				return false, nil
-			}
-			pair, err := splice.Get()
-			if err != nil {
-				return false, nil
-			}
-			pair.Grow(int(body.Size))
-			defer splice.Done(pair)
-			_, err = pair.LoadFromAt(file.File().Fd(), int(body.Size), int64(body.Offset))
-			if err != nil {
-				return false, nil
-			}
-
-			written := uint64(0)
-			var writeError error
-			err = dstRawConn.Write(func(fd uintptr) (done bool) {
-				var n int
-				n, writeError = pair.WriteTo(fd, int(body.Size-written))
-				if writeError == syscall.EAGAIN || writeError == syscall.EINTR {
-					// fmt.Printf("%s: written(%d)\n", writeError, written)
-					writeError = nil
-					return false
-				}
-				if writeError != nil {
-					return true
-				}
-				written += uint64(n)
-				return written == body.Size
-			})
-			if err == nil {
-				err = writeError
-			}
-			return true, err
-		}()
-		if err != nil {
+		spliced, err := body.spliceTo(e.w)
+		if err != nil || spliced {
 			return err
-		}
-		if spliced {
-			return nil
 		}
 		nc, err := io.CopyN(e.w, body.Reader, int64(body.Size))
 		if err != nil {
