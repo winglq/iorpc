@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"encoding/gob"
 	"io"
+	"log"
+	"syscall"
 
 	"github.com/pkg/errors"
 )
@@ -93,56 +95,73 @@ func (e *messageEncoder) encode(body *Body) error {
 	}
 
 	if body.Reader != nil {
-		// 	spliced, err := func() (bool, error) {
-		// 		fileslice, ok := body.(*FileSlice)
-		// 		if !ok {
-		// 			return false, nil
-		// 		}
-		// 		syscallConn, ok := e.w.(syscall.Conn)
-		// 		if !ok {
-		// 			return false, nil
-		// 		}
-		// 		rawConn, err := syscallConn.SyscallConn()
-		// 		if err != nil {
-		// 			return false, nil
-		// 		}
-		// 		pair, err := splice.Get()
-		// 		if err != nil {
-		// 			return false, nil
-		// 		}
-		// 		defer splice.Done(pair)
-		// 		for {
-		// 			written := 0
-		// 			_, err := pair.LoadFromAt(fileslice.Fd(), int(fileslice.size), int64(fileslice.offset))
-		// 			if err != nil {
-		// 				return false, nil
-		// 			}
-		// 			var writeError error
-		// 			err = rawConn.Write(func(fd uintptr) (done bool) {
-		// 				var n int
-		// 				n, writeError = pair.WriteTo(fd, int(fileslice.size)-written)
-		// 				if err != nil {
-		// 					log.Printf("pair.WriteTo() failed: %v", err)
-		// 					return true
-		// 				}
-		// 				written += n
-		// 				return written == int(fileslice.size)
-		// 			})
-		// 			if err != nil {
-		// 				return false, err
-		// 			}
-		// 			if writeError != nil {
-		// 				return false, err
-		// 			}
-		// 		}
-		// 	}()
-		// 	if err != nil {
-		// 		return err
-		// 	}
-		// 	if spliced {
-		// 		return nil
-		// 	}
 		defer body.Close()
+		spliced, err := func() (bool, error) {
+			file, ok := body.Reader.(IsFile)
+			if !ok {
+				return false, nil
+			}
+
+			syscallConn, ok := e.w.(syscall.Conn)
+			if !ok {
+				return false, nil
+			}
+
+			fileRawConn, err := file.File().SyscallConn()
+			if err != nil {
+				return false, nil
+			}
+
+			dstRawConn, err := syscallConn.SyscallConn()
+			if err != nil {
+				return false, nil
+			}
+			// pair, err := splice.Get()
+			// if err != nil {
+			// 	return false, nil
+			// }
+			// pair.Grow(int(body.Size))
+			// defer splice.Done(pair)
+			// _, err = pair.LoadFromAt(file.File().Fd(), int(body.Size), int64(body.Offset))
+			// if err != nil {
+			// 	return false, nil
+			// }
+
+			fileRawConn.Read(func(fd uintptr) (done bool) {
+				written := 0
+				var writeError error
+				err = dstRawConn.Write(func(fd uintptr) (done bool) {
+					var n int
+					// n, writeError = pair.WriteTo(fd, int(body.Size)-written)
+					offset := int64(body.Offset) + int64(written)
+					n, writeError = syscall.Sendfile(int(fd), int(file.File().Fd()), &offset, int(body.Size)-written)
+					written += n
+					if written == int(body.Size) {
+						return true
+					}
+					if err != nil {
+						if writeError == syscall.EAGAIN || writeError == syscall.EINTR {
+							// write again
+							return false
+						}
+						log.Printf("sendfile failed: %v", err)
+						return true
+					}
+					return false
+				})
+				if err == nil {
+					err = writeError
+				}
+				return true
+			})
+			return true, err
+		}()
+		if err != nil {
+			return err
+		}
+		if spliced {
+			return nil
+		}
 		nc, err := io.CopyN(e.w, body.Reader, int64(body.Size))
 		if err != nil {
 			e.stat.incWriteErrors()
