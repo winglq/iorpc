@@ -3,6 +3,7 @@ package iorpc
 import (
 	"encoding/binary"
 	"encoding/gob"
+	"fmt"
 	"io"
 
 	"github.com/pkg/errors"
@@ -92,12 +93,18 @@ func (e *messageEncoder) encode(body *Body) error {
 		e.stat.addHeadWritten(uint64(n))
 	}
 
-	if body.Reader != nil {
+	if body.Size != 0 && body.Reader != nil {
 		defer body.Close()
 		spliced, err := body.spliceTo(e.w)
-		if err != nil || spliced {
+		if spliced {
 			return err
 		}
+		if err != nil {
+			// TODO: deal with error
+			fmt.Println(err)
+			err = nil
+		}
+		// fallback to io.Copy when not spliced
 		nc, err := io.CopyN(e.w, body.Reader, int64(body.Size))
 		if err != nil {
 			e.stat.incWriteErrors()
