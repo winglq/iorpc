@@ -3,7 +3,6 @@ package splice
 import (
 	"fmt"
 	"log"
-	"os"
 	"syscall"
 )
 
@@ -14,9 +13,6 @@ func (p *Pair) LoadFromAt(fd uintptr, sz int, off int64) (int, error) {
 	}
 
 	n, err := syscall.Splice(int(fd), &off, p.w, nil, sz, 0)
-	if err != nil {
-		err = os.NewSyscallError("Splice load from", err)
-	}
 	return int(n), err
 }
 
@@ -26,9 +22,6 @@ func (p *Pair) LoadFrom(fd uintptr, sz int) (int, error) {
 
 func (p *Pair) WriteTo(fd uintptr, n int) (int, error) {
 	m, err := syscall.Splice(p.r, nil, int(fd), nil, int(n), 0)
-	if err != nil {
-		err = os.NewSyscallError("Splice write", err)
-	}
 	return int(m), err
 }
 

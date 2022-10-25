@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"encoding/gob"
 	"io"
-	"log"
 	"syscall"
 
 	"github.com/hexilee/iorpc/splice"
@@ -123,24 +122,21 @@ func (e *messageEncoder) encode(body *Body) error {
 				return false, nil
 			}
 
-			written := 0
+			written := uint64(0)
 			var writeError error
 			err = dstRawConn.Write(func(fd uintptr) (done bool) {
 				var n int
-				n, writeError = pair.WriteTo(fd, int(body.Size)-written)
-				written += n
-				if written == int(body.Size) {
+				n, writeError = pair.WriteTo(fd, int(body.Size-written))
+				if writeError == syscall.EAGAIN || writeError == syscall.EINTR {
+					// fmt.Printf("%s: written(%d)\n", writeError, written)
+					writeError = nil
+					return false
+				}
+				if writeError != nil {
 					return true
 				}
-				if err != nil {
-					if writeError == syscall.EAGAIN || writeError == syscall.EINTR {
-						// write again
-						return false
-					}
-					log.Printf("sendfile failed: %v", err)
-					return true
-				}
-				return false
+				written += uint64(n)
+				return written == body.Size
 			})
 			if err == nil {
 				err = writeError
