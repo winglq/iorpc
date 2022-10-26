@@ -1,7 +1,6 @@
 package iorpc
 
 import (
-	"bytes"
 	"io"
 	"os"
 	"syscall"
@@ -38,7 +37,7 @@ type IsPipe interface {
 
 type IsBuffer interface {
 	io.Closer
-	Buffer() *bytes.Buffer
+	Buffer() [][]byte
 }
 
 func (b *Body) Reset() {
@@ -112,8 +111,21 @@ func PipeConn(r IsConn, size int) (IsPipe, error) {
 	return &Pipe{pair: pair}, nil
 }
 
-func PipeBuffer(r IsBuffer, offset int64, size int) (IsPipe, error) {
-	return nil, errors.New("pipe buffer is unsupported")
+func PipeBuffer(r IsBuffer, size int) (IsPipe, error) {
+	pair, err := splice.Get()
+	if err != nil {
+		return nil, errors.Wrap(err, "get pipe pair")
+	}
+	err = pair.Grow(alignSize(size))
+	if err != nil {
+		return nil, errors.Wrap(err, "grow pipe pair")
+	}
+
+	_, err = pair.LoadBuffer(r.Buffer(), size, splice.SPLICE_F_GIFT)
+	if err != nil {
+		return nil, errors.Wrap(err, "pair load buffer")
+	}
+	return &Pipe{pair: pair}, nil
 }
 
 func (p *Pipe) ReadFd() uintptr {
@@ -161,7 +173,7 @@ func (b *Body) spliceTo(w io.Writer) (bool, error) {
 		}
 		defer pipe.Close()
 	case IsBuffer:
-		pipe, err = PipeBuffer(reader, int64(b.Offset), int(b.Size))
+		pipe, err = PipeBuffer(reader, int(b.Size))
 		if err != nil {
 			return false, errors.Wrap(err, "pipe buffer")
 		}
