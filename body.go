@@ -68,12 +68,17 @@ func PipeFile(r IsFile, offset int64, size int) (IsPipe, error) {
 	return &Pipe{pair: pair}, nil
 }
 
+func alignSize(size int) int {
+	pageSize := os.Getpagesize()
+	return size + pageSize - size%pageSize
+}
+
 func PipeConn(r IsConn, size int) (IsPipe, error) {
 	pair, err := splice.Get()
 	if err != nil {
 		return nil, errors.Wrap(err, "get pipe pair")
 	}
-	err = pair.Grow(size)
+	err = pair.Grow(alignSize(size))
 	if err != nil {
 		return nil, errors.Wrap(err, "grow pipe pair")
 	}
@@ -91,12 +96,8 @@ func PipeConn(r IsConn, size int) (IsPipe, error) {
 		var n int
 		n, loadError = pair.LoadFrom(fd, size-loaded, splice.SPLICE_F_NONBLOCK|splice.SPLICE_F_MOVE)
 		// n, loadError = syscall.Read(int(fd), buffer[loaded:])
-		if loadError == syscall.EAGAIN || loadError == syscall.EINTR {
-			loadError = nil
-			return false
-		}
 		if loadError != nil {
-			return true
+			return loadError != syscall.EAGAIN && loadError != syscall.EINTR
 		}
 		loaded += n
 		return loaded == size
