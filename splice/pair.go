@@ -5,6 +5,13 @@ import (
 	"syscall"
 )
 
+const (
+	SPLICE_F_MOVE     = 0x1
+	SPLICE_F_NONBLOCK = 0x2
+	SPLICE_F_MORE     = 0x4
+	SPLICE_F_GIFT     = 0x8
+)
+
 type Pair struct {
 	r, w int
 	size int

@@ -9,14 +9,14 @@ func SpliceCopy(dst *os.File, src *os.File, p *Pair) (int64, error) {
 	total := int64(0)
 
 	for {
-		n, err := p.LoadFrom(src.Fd(), p.size)
+		n, err := p.LoadFrom(src.Fd(), p.size, 0)
 		if err != nil {
 			return total, err
 		}
 		if n == 0 {
 			break
 		}
-		m, err := p.WriteTo(dst.Fd(), n)
+		m, err := p.WriteTo(dst.Fd(), n, 0)
 		total += int64(m)
 		if err != nil {
 			return total, err

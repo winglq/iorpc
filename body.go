@@ -33,7 +33,7 @@ type IsConn interface {
 type IsPipe interface {
 	io.ReadCloser
 	ReadFd() (fd uintptr)
-	WriteTo(fd uintptr, n int) (int, error)
+	WriteTo(fd uintptr, n int, flags int) (int, error)
 }
 
 type IsBuffer interface {
@@ -61,7 +61,7 @@ func PipeFile(r IsFile, offset int64, size int) (IsPipe, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "grow pipe pair")
 	}
-	_, err = pair.LoadFromAt(r.File().Fd(), size, &offset)
+	_, err = pair.LoadFromAt(r.File().Fd(), size, &offset, splice.SPLICE_F_MOVE)
 	if err != nil {
 		return nil, errors.Wrap(err, "pair load file")
 	}
@@ -85,9 +85,12 @@ func PipeConn(r IsConn, size int) (IsPipe, error) {
 
 	loaded := 0
 	var loadError error
+
+	// buffer := make([]byte, size)
 	err = rawConn.Read(func(fd uintptr) (done bool) {
 		var n int
-		n, loadError = pair.LoadFrom(fd, size-loaded)
+		n, loadError = pair.LoadFrom(fd, size-loaded, splice.SPLICE_F_NONBLOCK|splice.SPLICE_F_MOVE)
+		// n, loadError = syscall.Read(int(fd), buffer[loaded:])
 		if loadError == syscall.EAGAIN || loadError == syscall.EINTR {
 			loadError = nil
 			return false
@@ -116,11 +119,11 @@ func (p *Pipe) ReadFd() uintptr {
 	return p.pair.ReadFd()
 }
 
-func (p *Pipe) WriteTo(fd uintptr, n int) (int, error) {
+func (p *Pipe) WriteTo(fd uintptr, n int, flags int) (int, error) {
 	if p.pair == nil {
 		return 0, io.EOF
 	}
-	return p.pair.WriteTo(fd, n)
+	return p.pair.WriteTo(fd, n, flags)
 }
 
 func (p *Pipe) Read(b []byte) (int, error) {
@@ -180,7 +183,7 @@ func (b *Body) spliceTo(w io.Writer) (bool, error) {
 	var writeError error
 	err = dstRawConn.Write(func(fd uintptr) (done bool) {
 		var n int
-		n, writeError = pipe.WriteTo(fd, int(b.Size-written))
+		n, writeError = pipe.WriteTo(fd, int(b.Size-written), splice.SPLICE_F_NONBLOCK|splice.SPLICE_F_MOVE)
 		if writeError == syscall.EAGAIN || writeError == syscall.EINTR {
 			writeError = nil
 			return false

@@ -21,7 +21,7 @@ func TestPairSize(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	_, err = p.LoadFrom(f.Fd(), len(b))
+	_, err = p.LoadFrom(f.Fd(), len(b), 0)
 	if err == nil {
 		t.Fatalf("should give error on exceeding capacity")
 	}
