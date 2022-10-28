@@ -2,62 +2,72 @@ package iorpc
 
 import (
 	"encoding/binary"
-	"encoding/gob"
 	"io"
+	"reflect"
 
 	"github.com/pkg/errors"
 )
 
-// RegisterType registers the given type to send via rpc.
-//
-// The client must register all the response types the server may send.
-// The server must register all the request types the client may send.
-//
-// There is no need in registering base Go types such as int, string, bool,
-// float64, etc. or arrays, slices and maps containing base Go types.
-//
-// There is no need in registering argument and return value types
-// for functions and methods registered via Dispatcher.
-func RegisterType(x interface{}) {
-	gob.Register(x)
-}
-
 var (
 	requestStartLineSize  = binary.Size(requestStartLine{})
 	responseStartLineSize = binary.Size(responseStartLine{})
+
+	// headersConstructors[0] should be nil
+	headersConstructors = make([]func() Headers, 1)
+	headersIndexes      = make(map[reflect.Type]uint32)
 )
 
+func RegisterHeaders(constructor func() Headers) {
+	h := constructor()
+	headersIndexes[reflect.TypeOf(h)] = uint32(len(headersConstructors))
+	headersConstructors = append(headersConstructors, constructor)
+}
+
+func newHeaders(index uint32) Headers {
+	constructor := headersConstructors[index]
+	if constructor == nil {
+		return nil
+	}
+	return constructor()
+}
+
+func indexHeaders(h Headers) uint32 {
+	if h == nil {
+		return 0
+	}
+	return headersIndexes[reflect.TypeOf(h)]
+}
+
 type requestStartLine struct {
-	Service      uint32
-	HeaderSize   uint32
-	ID, BodySize uint64
+	Service                uint32
+	HeaderType, HeaderSize uint32
+	ID, BodySize           uint64
 }
 
 type responseStartLine struct {
-	ErrorSize    uint32
-	HeaderSize   uint32
-	ID, BodySize uint64
+	ErrorSize              uint32
+	HeaderType, HeaderSize uint32
+	ID, BodySize           uint64
 }
 
 type wireRequest struct {
 	Service uint32
 	ID      uint64
-	Headers map[string]any
+	Headers Headers
 	Body    Body
 }
 
 type wireResponse struct {
 	ID      uint64
-	Headers map[string]any
+	Headers Headers
 	Body    Body
 	Error   string
 }
 
 type messageEncoder struct {
-	w             io.Writer
-	headerBuffer  *Buffer
-	headerEncoder *gob.Encoder
-	stat          *ConnStats
+	w            io.Writer
+	headerBuffer *Buffer
+	stat         *ConnStats
 }
 
 func (e *messageEncoder) Close() error {
@@ -119,9 +129,10 @@ func (e *messageEncoder) encode(body *Body) error {
 }
 
 func (e *messageEncoder) EncodeRequest(req wireRequest) error {
-	if len(req.Headers) != 0 {
+	headerIndex := indexHeaders(req.Headers)
+	if req.Headers != nil && headerIndex != 0 {
 		e.headerBuffer.Reset()
-		if err := e.headerEncoder.Encode(req.Headers); err != nil {
+		if err := req.Headers.Encode(e.headerBuffer); err != nil {
 			e.stat.incWriteErrors()
 			return err
 		}
@@ -130,6 +141,7 @@ func (e *messageEncoder) EncodeRequest(req wireRequest) error {
 	if err := binary.Write(e.w, binary.BigEndian, requestStartLine{
 		ID:         req.ID,
 		Service:    req.Service,
+		HeaderType: headerIndex,
 		HeaderSize: uint32(e.headerBuffer.Len()),
 		BodySize:   req.Body.Size,
 	}); err != nil {
@@ -142,9 +154,10 @@ func (e *messageEncoder) EncodeRequest(req wireRequest) error {
 }
 
 func (e *messageEncoder) EncodeResponse(resp wireResponse) error {
-	if len(resp.Headers) != 0 {
+	headerIndex := indexHeaders(resp.Headers)
+	if resp.Headers != nil && headerIndex != 0 {
 		e.headerBuffer.Reset()
-		if err := e.headerEncoder.Encode(resp.Headers); err != nil {
+		if err := resp.Headers.Encode(e.headerBuffer); err != nil {
 			e.stat.incWriteErrors()
 			return err
 		}
@@ -155,6 +168,7 @@ func (e *messageEncoder) EncodeResponse(resp wireResponse) error {
 	if err := binary.Write(e.w, binary.BigEndian, responseStartLine{
 		ID:         resp.ID,
 		ErrorSize:  uint32(len(respErr)),
+		HeaderType: headerIndex,
 		HeaderSize: uint32(e.headerBuffer.Len()),
 		BodySize:   resp.Body.Size,
 	}); err != nil {
@@ -177,38 +191,21 @@ func (e *messageEncoder) EncodeResponse(resp wireResponse) error {
 }
 
 func newMessageEncoder(w io.Writer, s *ConnStats) *messageEncoder {
-	// w = newWriterCounter(w, s)
-	// bw := bufio.NewWriterSize(w, bufferSize)
-
-	// ww := bw
-	// var zw *flate.Writer
-	// if enableCompression {
-	// 	zw, _ = flate.NewWriter(bw, flate.BestSpeed)
-	// 	ww = bufio.NewWriterSize(zw, bufferSize)
-	// }
-
-	headerBuffer := bufferPool.Get().(*Buffer)
-
 	return &messageEncoder{
-		w:             w,
-		headerBuffer:  headerBuffer,
-		headerEncoder: gob.NewEncoder(headerBuffer),
-		stat:          s,
+		w:            w,
+		headerBuffer: bufferPool.Get().(*Buffer),
+		stat:         s,
 	}
 }
 
 type messageDecoder struct {
-	closeBody     bool
-	r             io.Reader
-	headerBuffer  *Buffer
-	headerDecoder *gob.Decoder
-	stat          *ConnStats
+	closeBody    bool
+	r            io.Reader
+	headerBuffer *Buffer
+	stat         *ConnStats
 }
 
 func (d *messageDecoder) Close() error {
-	// if d.zr != nil {
-	// 	return d.zr.Close()
-	// }
 	return d.headerBuffer.Close()
 }
 
@@ -260,14 +257,14 @@ func (d *messageDecoder) DecodeRequest(req *wireRequest) error {
 	req.Service = startLine.Service
 	req.Body.Size = startLine.BodySize
 
-	if startLine.HeaderSize > 0 {
+	if req.Headers = newHeaders(startLine.HeaderType); req.Headers != nil && startLine.HeaderSize > 0 {
 		d.headerBuffer.Reset()
 		if _, err := io.CopyN(d.headerBuffer, d.r, int64(startLine.HeaderSize)); err != nil {
 			d.stat.incReadErrors()
 			return err
 		}
 		d.stat.addHeadRead(uint64(startLine.HeaderSize))
-		if err := d.headerDecoder.Decode(&req.Headers); err != nil {
+		if err := req.Headers.Decode(d.headerBuffer); err != nil {
 			d.stat.incReadErrors()
 			return err
 		}
@@ -305,14 +302,14 @@ func (d *messageDecoder) DecodeResponse(resp *wireResponse) error {
 		resp.Error = string(respErr)
 	}
 
-	if startLine.HeaderSize > 0 {
+	if resp.Headers = newHeaders(startLine.HeaderType); resp.Headers != nil && startLine.HeaderSize > 0 {
 		d.headerBuffer.Reset()
 		if _, err := io.CopyN(d.headerBuffer, d.r, int64(startLine.HeaderSize)); err != nil {
 			d.stat.incReadErrors()
 			return errors.Wrapf(err, "read response headers: size(%d)", startLine.HeaderSize)
 		}
 		d.stat.addHeadRead(uint64(startLine.HeaderSize))
-		if err := d.headerDecoder.Decode(&resp.Headers); err != nil {
+		if err := resp.Headers.Decode(d.headerBuffer); err != nil {
 			d.stat.incReadErrors()
 			return err
 		}
@@ -332,10 +329,9 @@ func (d *messageDecoder) DecodeResponse(resp *wireResponse) error {
 func newMessageDecoder(r io.Reader, s *ConnStats, closeBody bool) *messageDecoder {
 	headerBuffer := bufferPool.Get().(*Buffer)
 	return &messageDecoder{
-		r:             r,
-		headerBuffer:  headerBuffer,
-		headerDecoder: gob.NewDecoder(headerBuffer),
-		stat:          s,
-		closeBody:     closeBody,
+		r:            r,
+		headerBuffer: headerBuffer,
+		stat:         s,
+		closeBody:    closeBody,
 	}
 }

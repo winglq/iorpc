@@ -9,14 +9,19 @@ import (
 	"time"
 )
 
+type Headers interface {
+	Encode(io.Writer) error
+	Decode(io.Reader) error
+}
+
 type Request struct {
 	Service Service
-	Headers map[string]any
+	Headers Headers
 	Body    Body
 }
 
 type Response struct {
-	Headers map[string]any
+	Headers Headers
 	Body    Body
 }
 
