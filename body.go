@@ -56,7 +56,7 @@ func PipeFile(r IsFile, offset int64, size int) (IsPipe, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "get pipe pair")
 	}
-	err = pair.Grow(size)
+	err = pair.Grow(alignSize(size))
 	if err != nil {
 		return nil, errors.Wrap(err, "grow pipe pair")
 	}
