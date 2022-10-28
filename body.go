@@ -197,12 +197,8 @@ func (b *Body) spliceTo(w io.Writer) (bool, error) {
 	err = dstRawConn.Write(func(fd uintptr) (done bool) {
 		var n int
 		n, writeError = pipe.WriteTo(fd, int(b.Size-written), splice.SPLICE_F_NONBLOCK|splice.SPLICE_F_MOVE)
-		if writeError == syscall.EAGAIN || writeError == syscall.EINTR {
-			writeError = nil
-			return false
-		}
 		if writeError != nil {
-			return true
+			return writeError != syscall.EAGAIN && writeError != syscall.EINTR
 		}
 		written += uint64(n)
 		return written == b.Size
