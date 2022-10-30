@@ -21,7 +21,7 @@ type Pipe struct {
 
 type IsFile interface {
 	io.Closer
-	File() *os.File
+	File() (fd uintptr)
 }
 
 type IsConn interface {
@@ -60,7 +60,7 @@ func PipeFile(r IsFile, offset int64, size int) (IsPipe, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "grow pipe pair")
 	}
-	_, err = pair.LoadFromAt(r.File().Fd(), size, &offset, splice.SPLICE_F_MOVE)
+	_, err = pair.LoadFromAt(r.File(), size, &offset, splice.SPLICE_F_MOVE)
 	if err != nil {
 		return nil, errors.Wrap(err, "pair load file")
 	}
