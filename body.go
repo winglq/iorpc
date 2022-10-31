@@ -155,33 +155,6 @@ func (p *Pipe) Close() error {
 }
 
 func (b *Body) spliceTo(w io.Writer) (bool, error) {
-	var pipe IsPipe
-	var err error
-	switch reader := b.Reader.(type) {
-	case IsPipe:
-		pipe = reader
-	case IsFile:
-		pipe, err = PipeFile(reader, int64(b.Offset), int(b.Size))
-		if err != nil {
-			return false, errors.Wrap(err, "pipe file")
-		}
-		defer pipe.Close()
-	case IsConn:
-		pipe, err = PipeConn(reader, int(b.Size))
-		if err != nil {
-			return false, errors.Wrap(err, "pipe conn")
-		}
-		defer pipe.Close()
-	case IsBuffer:
-		pipe, err = PipeBuffer(reader, int(b.Size))
-		if err != nil {
-			return false, errors.Wrap(err, "pipe buffer")
-		}
-		defer pipe.Close()
-	default:
-		return false, nil
-	}
-
 	syscallConn, ok := w.(syscall.Conn)
 	if !ok {
 		return false, nil
@@ -191,6 +164,26 @@ func (b *Body) spliceTo(w io.Writer) (bool, error) {
 	if err != nil {
 		return false, nil
 	}
+
+	var pipe IsPipe
+	switch reader := b.Reader.(type) {
+	case IsPipe:
+		pipe = reader
+	case IsFile:
+		pipe, err = PipeFile(reader, int64(b.Offset), int(b.Size))
+	case IsConn:
+		pipe, err = PipeConn(reader, int(b.Size))
+	case IsBuffer:
+		pipe, err = PipeBuffer(reader, int(b.Size))
+	default:
+		return false, nil
+	}
+
+	if err != nil {
+		// fail to load reader, fallback to normal copy
+		return false, nil
+	}
+	defer pipe.Close()
 
 	written := uint64(0)
 	var writeError error

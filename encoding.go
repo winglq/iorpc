@@ -106,8 +106,7 @@ func (e *messageEncoder) encode(body *Body) error {
 		defer body.Close()
 		spliced, err := body.spliceTo(e.w)
 		if err != nil {
-			// TODO: deal with error
-			err = nil
+			return errors.Wrap(err, "splice body")
 		}
 		if spliced {
 			e.stat.addBodyWritten(body.Size)
