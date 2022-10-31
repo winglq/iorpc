@@ -11,7 +11,7 @@ import (
 
 type Headers interface {
 	Encode(io.Writer) error
-	Decode(io.Reader) error
+	Decode([]byte) error
 }
 
 type Request struct {

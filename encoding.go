@@ -263,7 +263,7 @@ func (d *messageDecoder) DecodeRequest(req *wireRequest) error {
 			return err
 		}
 		d.stat.addHeadRead(uint64(startLine.HeaderSize))
-		if err := req.Headers.Decode(d.headerBuffer); err != nil {
+		if err := req.Headers.Decode(d.headerBuffer.Bytes()); err != nil {
 			d.stat.incReadErrors()
 			return err
 		}
@@ -308,7 +308,7 @@ func (d *messageDecoder) DecodeResponse(resp *wireResponse) error {
 			return errors.Wrapf(err, "read response headers: size(%d)", startLine.HeaderSize)
 		}
 		d.stat.addHeadRead(uint64(startLine.HeaderSize))
-		if err := resp.Headers.Decode(d.headerBuffer); err != nil {
+		if err := resp.Headers.Decode(d.headerBuffer.Bytes()); err != nil {
 			d.stat.incReadErrors()
 			return err
 		}
