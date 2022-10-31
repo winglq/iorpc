@@ -37,7 +37,7 @@ type IsPipe interface {
 
 type IsBuffer interface {
 	io.Closer
-	Buffer() [][]byte
+	Iovec() [][]byte
 }
 
 func (b *Body) Reset() {
@@ -121,7 +121,7 @@ func PipeBuffer(r IsBuffer, size int) (IsPipe, error) {
 		return nil, errors.Wrap(err, "grow pipe pair")
 	}
 
-	_, err = pair.LoadBuffer(r.Buffer(), size, splice.SPLICE_F_GIFT)
+	_, err = pair.LoadBuffer(r.Iovec(), size, splice.SPLICE_F_GIFT)
 	if err != nil {
 		return nil, errors.Wrap(err, "pair load buffer")
 	}
