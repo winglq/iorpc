@@ -208,32 +208,13 @@ func (d *messageDecoder) Close() error {
 	return d.headerBuffer.Close()
 }
 
-func (d *messageDecoder) spliceBody(size int64) (IsPipe, error) {
-	if size == 0 {
-		return nil, nil
-	}
-
-	r, ok := d.r.(IsConn)
-	if !ok {
-		return nil, nil
-	}
-
-	return PipeConn(r, int(size))
-}
-
 func (d *messageDecoder) decodeBody(size int64) (body io.ReadCloser, err error) {
 	defer func() {
 		if body != nil && d.closeBody {
 			body.Close()
 		}
 	}()
-	body, _ = d.spliceBody(size) // ignore error
-	if body != nil {
-		d.stat.addBodyRead(uint64(size))
-		return
-	}
 
-	// fallback to buffer
 	buf := bufferPool.Get().(*Buffer)
 	bytes, err := buf.ReadFrom(io.LimitReader(d.r, int64(size)))
 	if err != nil {
