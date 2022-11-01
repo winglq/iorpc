@@ -167,10 +167,13 @@ func (s *Server) Start() error {
 	if s.Listener == nil {
 		s.Listener = &defaultListener{}
 	}
-	if err := s.Listener.Init(s.Addr); err != nil {
-		err = fmt.Errorf("gorpc.Server: [%s]. Cannot listen to: [%s]", s.Addr, err)
-		s.LogError("%s", err)
-		return err
+	if s.Listener.ListenAddr() == nil {
+		err := s.Listener.Init(s.Addr)
+		if err != nil {
+			err = fmt.Errorf("gorpc.Server: [%s]. Cannot listen to: [%s]", s.Addr, err)
+			s.LogError("%s", err)
+			return err
+		}
 	}
 
 	workersCh := make(chan struct{}, s.Concurrency)
