@@ -215,6 +215,10 @@ func (d *messageDecoder) decodeBody(size int64) (body io.ReadCloser, err error) 
 		}
 	}()
 
+	if size == 0 {
+		return noopBody{}, nil
+	}
+
 	buf := bufferPool.Get().(*Buffer)
 	bytes, err := buf.ReadFrom(io.LimitReader(d.r, int64(size)))
 	if err != nil {
@@ -250,13 +254,11 @@ func (d *messageDecoder) DecodeRequest(req *wireRequest) error {
 		}
 	}
 
-	if req.Body.Size > 0 {
-		buf, err := d.decodeBody(int64(req.Body.Size))
-		if err != nil {
-			return err
-		}
-		req.Body.Reader = buf
+	buf, err := d.decodeBody(int64(req.Body.Size))
+	if err != nil {
+		return err
 	}
+	req.Body.Reader = buf
 	d.stat.incReadCalls()
 	return nil
 }
@@ -295,13 +297,11 @@ func (d *messageDecoder) DecodeResponse(resp *wireResponse) error {
 		}
 	}
 
-	if resp.Body.Size > 0 {
-		buf, err := d.decodeBody(int64(resp.Body.Size))
-		if err != nil {
-			return err
-		}
-		resp.Body.Reader = buf
+	buf, err := d.decodeBody(int64(resp.Body.Size))
+	if err != nil {
+		return err
 	}
+	resp.Body.Reader = buf
 	d.stat.incReadCalls()
 	return nil
 }

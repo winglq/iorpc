@@ -40,6 +40,16 @@ type IsBuffer interface {
 	Iovec() [][]byte
 }
 
+type noopBody struct{}
+
+func (noopBody) Read(p []byte) (int, error) {
+	return 0, io.EOF
+}
+
+func (noopBody) Close() error {
+	return nil
+}
+
 func (b *Body) Reset() {
 	b.Offset, b.Size, b.Reader, b.NotClose = 0, 0, nil, false
 }
