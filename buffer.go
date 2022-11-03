@@ -2,23 +2,47 @@ package iorpc
 
 import (
 	"bytes"
+	"io"
 	"sync"
 )
 
+var BufferAllocator func(size int) Buffer
+
+func init() {
+	if BufferAllocator == nil {
+		BufferAllocator = func(size int) Buffer {
+			buf := bufferPool.Get().(*buffer)
+			buf.Grow(size)
+			return buf
+		}
+	}
+}
+
+type Buffer interface {
+	io.ReadWriteCloser
+	Reset()
+	Bytes() []byte
+	Underlying() any
+}
+
 var bufferPool = sync.Pool{
 	New: func() any {
-		return &Buffer{
+		return &buffer{
 			bytes.NewBuffer(make([]byte, 0)),
 		}
 	},
 }
 
-type Buffer struct {
+type buffer struct {
 	*bytes.Buffer
 }
 
-func (b *Buffer) Close() error {
+func (b *buffer) Close() error {
 	b.Reset()
 	bufferPool.Put(b)
 	return nil
+}
+
+func (b *buffer) Underlying() any {
+	return b.Buffer
 }

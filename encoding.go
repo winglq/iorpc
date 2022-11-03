@@ -66,7 +66,7 @@ type wireResponse struct {
 
 type messageEncoder struct {
 	w            io.Writer
-	headerBuffer *Buffer
+	headerBuffer Buffer
 	stat         *ConnStats
 }
 
@@ -93,7 +93,7 @@ func (e *messageEncoder) Flush() error {
 }
 
 func (e *messageEncoder) encode(body *Body) error {
-	if e.headerBuffer.Len() > 0 {
+	if len(e.headerBuffer.Bytes()) > 0 {
 		n, err := e.w.Write(e.headerBuffer.Bytes())
 		if err != nil {
 			e.stat.incWriteErrors()
@@ -141,7 +141,7 @@ func (e *messageEncoder) EncodeRequest(req wireRequest) error {
 		ID:         req.ID,
 		Service:    req.Service,
 		HeaderType: headerIndex,
-		HeaderSize: uint32(e.headerBuffer.Len()),
+		HeaderSize: uint32(len(e.headerBuffer.Bytes())),
 		BodySize:   req.Body.Size,
 	}); err != nil {
 		e.stat.incWriteErrors()
@@ -168,7 +168,7 @@ func (e *messageEncoder) EncodeResponse(resp wireResponse) error {
 		ID:         resp.ID,
 		ErrorSize:  uint32(len(respErr)),
 		HeaderType: headerIndex,
-		HeaderSize: uint32(e.headerBuffer.Len()),
+		HeaderSize: uint32(len(e.headerBuffer.Bytes())),
 		BodySize:   resp.Body.Size,
 	}); err != nil {
 		e.stat.incWriteErrors()
@@ -192,7 +192,7 @@ func (e *messageEncoder) EncodeResponse(resp wireResponse) error {
 func newMessageEncoder(w io.Writer, s *ConnStats) *messageEncoder {
 	return &messageEncoder{
 		w:            w,
-		headerBuffer: bufferPool.Get().(*Buffer),
+		headerBuffer: BufferAllocator(0),
 		stat:         s,
 	}
 }
@@ -200,7 +200,7 @@ func newMessageEncoder(w io.Writer, s *ConnStats) *messageEncoder {
 type messageDecoder struct {
 	closeBody    bool
 	r            io.Reader
-	headerBuffer *Buffer
+	headerBuffer Buffer
 	stat         *ConnStats
 }
 
@@ -219,8 +219,8 @@ func (d *messageDecoder) decodeBody(size int64) (body io.ReadCloser, err error) 
 		return noopBody{}, nil
 	}
 
-	buf := bufferPool.Get().(*Buffer)
-	bytes, err := buf.ReadFrom(io.LimitReader(d.r, int64(size)))
+	buf := BufferAllocator(int(size))
+	bytes, err := io.CopyN(buf, d.r, size)
 	if err != nil {
 		return nil, err
 	}
@@ -307,7 +307,7 @@ func (d *messageDecoder) DecodeResponse(resp *wireResponse) error {
 }
 
 func newMessageDecoder(r io.Reader, s *ConnStats, closeBody bool) *messageDecoder {
-	headerBuffer := bufferPool.Get().(*Buffer)
+	headerBuffer := BufferAllocator(0)
 	return &messageDecoder{
 		r:            r,
 		headerBuffer: headerBuffer,
