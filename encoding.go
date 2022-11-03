@@ -222,6 +222,7 @@ func (d *messageDecoder) decodeBody(size int64) (body io.ReadCloser, err error) 
 	buf := bufferAllocator(int(size))
 	bytes, err := io.CopyN(buf, d.r, size)
 	if err != nil {
+		buf.Close()
 		return nil, err
 	}
 	d.stat.addBodyRead(uint64(bytes))
