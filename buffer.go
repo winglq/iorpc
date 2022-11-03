@@ -6,15 +6,19 @@ import (
 	"sync"
 )
 
-var BufferAllocator func(size int) Buffer
+func RegisterAllocator(allocator func(size int) Buffer) {
+	bufferAllocator = allocator
+}
+
+var bufferAllocator func(size int) Buffer
 
 func init() {
-	if BufferAllocator == nil {
-		BufferAllocator = func(size int) Buffer {
+	if bufferAllocator == nil {
+		RegisterAllocator(func(size int) Buffer {
 			buf := bufferPool.Get().(*buffer)
 			buf.Grow(size)
 			return buf
-		}
+		})
 	}
 }
 

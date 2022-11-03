@@ -192,7 +192,7 @@ func (e *messageEncoder) EncodeResponse(resp wireResponse) error {
 func newMessageEncoder(w io.Writer, s *ConnStats) *messageEncoder {
 	return &messageEncoder{
 		w:            w,
-		headerBuffer: BufferAllocator(0),
+		headerBuffer: bufferAllocator(0),
 		stat:         s,
 	}
 }
@@ -219,7 +219,7 @@ func (d *messageDecoder) decodeBody(size int64) (body io.ReadCloser, err error) 
 		return noopBody{}, nil
 	}
 
-	buf := BufferAllocator(int(size))
+	buf := bufferAllocator(int(size))
 	bytes, err := io.CopyN(buf, d.r, size)
 	if err != nil {
 		return nil, err
@@ -307,7 +307,7 @@ func (d *messageDecoder) DecodeResponse(resp *wireResponse) error {
 }
 
 func newMessageDecoder(r io.Reader, s *ConnStats, closeBody bool) *messageDecoder {
-	headerBuffer := BufferAllocator(0)
+	headerBuffer := bufferAllocator(0)
 	return &messageDecoder{
 		r:            r,
 		headerBuffer: headerBuffer,
