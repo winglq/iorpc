@@ -192,7 +192,7 @@ func (e *messageEncoder) EncodeResponse(resp wireResponse) error {
 func newMessageEncoder(w io.Writer, s *ConnStats) *messageEncoder {
 	return &messageEncoder{
 		w:            w,
-		headerBuffer: bufferAllocator(0),
+		headerBuffer: bufferAllocator(1 << 10),
 		stat:         s,
 	}
 }
@@ -307,7 +307,7 @@ func (d *messageDecoder) DecodeResponse(resp *wireResponse) error {
 }
 
 func newMessageDecoder(r io.Reader, s *ConnStats, closeBody bool) *messageDecoder {
-	headerBuffer := bufferAllocator(0)
+	headerBuffer := bufferAllocator(1 << 10)
 	return &messageDecoder{
 		r:            r,
 		headerBuffer: headerBuffer,
