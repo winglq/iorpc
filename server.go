@@ -10,7 +10,7 @@ import (
 )
 
 type Headers interface {
-	Encode(io.Writer) error
+	Encode(io.Writer) (int, error)
 	Decode([]byte) error
 }
 
