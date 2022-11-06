@@ -54,6 +54,8 @@ func (b *buffer) Underlying() any {
 	return b.Buffer
 }
 
+type Page interface{}
+
 type ringBuffer struct {
 	start, size int64
 	buf         []byte
@@ -95,7 +97,7 @@ func (b *ringBuffer) Consume(consumer func() (int, error)) (int, error) {
 	if err != nil {
 		return n, err
 	}
-	b.start += int64(n)
+	b.start = (b.start + int64(n)) % b.Capacity()
 	b.size -= int64(n)
 	return n, nil
 }
@@ -111,38 +113,35 @@ func (b *ringBuffer) read(p []byte) (int, error) {
 		return 0, io.EOF
 	}
 
-	index := b.start % b.Capacity()
-	if index+b.size <= b.Capacity() {
-		return copy(p, b.buf[index:index+b.size]), nil
+	if b.start+b.size <= b.Capacity() {
+		return copy(p, b.buf[b.start:b.start+b.size]), nil
 	}
 
 	n := copy(p, b.buf[b.start:])
 	if len(p) > n {
-		n += copy(p[n:], b.buf[:(index+b.size)%b.Capacity()])
+		n += copy(p[n:], b.buf[:(b.start+b.size)%b.Capacity()])
 	}
 	return n, nil
 }
 
 func (b *ringBuffer) TrySlice(size int64) (data []byte, sliced bool) {
 	data, sliced = b.trySlice(size)
-	b.start += int64(len(data))
+	b.start = (b.start + int64(len(data))) % b.Capacity()
 	b.size -= int64(len(data))
 	return data, sliced
 }
 
 func (b *ringBuffer) trySlice(size int64) (data []byte, sliced bool) {
 	if b.size == 0 {
-		return nil, false
+		return []byte{}, false
 	}
-
-	index := b.start % b.Capacity()
 
 	if b.size < size {
 		size = b.size
 	}
 
-	if index+size <= b.Capacity() {
-		return b.buf[index : index+size], true
+	if b.start+size <= b.Capacity() {
+		return b.buf[b.start : b.start+size], true
 	}
 
 	data = make([]byte, size)
@@ -164,9 +163,7 @@ func (b *ringBuffer) write(p []byte) (int, error) {
 		return len(p), nil
 	}
 
-	index := b.start % b.Capacity()
-
-	n := copy(b.buf[index:], p)
+	n := copy(b.buf[b.start:], p)
 	if len(p) > n {
 		n += copy(b.buf, p[n:])
 	}
