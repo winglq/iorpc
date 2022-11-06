@@ -233,7 +233,7 @@ func newMessageEncoder(w io.Writer, s *ConnStats) *messageEncoder {
 type messageDecoder struct {
 	closeBody    bool
 	r            io.Reader
-	headerBuffer Buffer
+	headerBuffer *ringBuffer
 	stat         *ConnStats
 }
 
@@ -276,13 +276,13 @@ func (d *messageDecoder) DecodeRequest(req *wireRequest) error {
 	req.Body.Size = startLine.BodySize
 
 	if req.Headers = newHeaders(startLine.HeaderType); req.Headers != nil && startLine.HeaderSize > 0 {
-		d.headerBuffer.Reset()
 		if _, err := io.CopyN(d.headerBuffer, d.r, int64(startLine.HeaderSize)); err != nil {
 			d.stat.incReadErrors()
 			return err
 		}
 		d.stat.addHeadRead(uint64(startLine.HeaderSize))
-		if err := req.Headers.Decode(d.headerBuffer.Bytes()); err != nil {
+		buf, _ := d.headerBuffer.TrySlice(int64(startLine.HeaderSize))
+		if err := req.Headers.Decode(buf); err != nil {
 			d.stat.incReadErrors()
 			return err
 		}
@@ -319,13 +319,13 @@ func (d *messageDecoder) DecodeResponse(resp *wireResponse) error {
 	}
 
 	if resp.Headers = newHeaders(startLine.HeaderType); resp.Headers != nil && startLine.HeaderSize > 0 {
-		d.headerBuffer.Reset()
 		if _, err := io.CopyN(d.headerBuffer, d.r, int64(startLine.HeaderSize)); err != nil {
 			d.stat.incReadErrors()
 			return errors.Wrapf(err, "read response headers: size(%d)", startLine.HeaderSize)
 		}
 		d.stat.addHeadRead(uint64(startLine.HeaderSize))
-		if err := resp.Headers.Decode(d.headerBuffer.Bytes()); err != nil {
+		buf, _ := d.headerBuffer.TrySlice(int64(startLine.HeaderSize))
+		if err := resp.Headers.Decode(buf); err != nil {
 			d.stat.incReadErrors()
 			return err
 		}
@@ -341,10 +341,9 @@ func (d *messageDecoder) DecodeResponse(resp *wireResponse) error {
 }
 
 func newMessageDecoder(r io.Reader, s *ConnStats, closeBody bool) *messageDecoder {
-	headerBuffer := bufferAllocator(headerBufferSize)
 	return &messageDecoder{
 		r:            r,
-		headerBuffer: headerBuffer,
+		headerBuffer: newRingBuffer(headerBufferSize),
 		stat:         s,
 		closeBody:    closeBody,
 	}
