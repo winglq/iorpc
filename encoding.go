@@ -185,7 +185,6 @@ func (e *messageEncoder) EncodeResponse(resp wireResponse) error {
 	headerSize := 0
 	headerIndex := indexHeaders(resp.Headers)
 	if resp.Headers != nil && headerIndex != 0 {
-		e.headerBuffer.Reset()
 		if headerSize, err = resp.Headers.Encode(e.headerBuffer); err != nil {
 			e.stat.incWriteErrors()
 			return errors.Wrap(err, "encode headers")

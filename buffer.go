@@ -54,8 +54,6 @@ func (b *buffer) Underlying() any {
 	return b.Buffer
 }
 
-type Page interface{}
-
 type ringBuffer struct {
 	start, size int64
 	buf         []byte
