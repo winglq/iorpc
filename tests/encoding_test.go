@@ -2,17 +2,20 @@ package tests
 
 import (
 	"bytes"
+	"context"
 	"crypto/md5"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"testing"
 	"time"
 
 	"github.com/hexilee/iorpc"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
+	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -90,9 +93,8 @@ func NewServer() *iorpc.Server {
 }
 
 func sum(key uint64, data []byte) []byte {
-	hasher := md5.New()
-	binary.Write(hasher, binary.BigEndian, key)
-	return hasher.Sum(data)
+	hash := md5.Sum(binary.AppendUvarint(data, key))
+	return hash[:]
 }
 
 func (b buffer) Iovec() [][]byte {
@@ -108,12 +110,20 @@ func (b buffer) Read(p []byte) (n int, err error) {
 	return
 }
 
-func NewClient(addr string) *iorpc.Client {
+func NewClient(addr string, conns int) *iorpc.Client {
 	c := iorpc.NewTCPClient(addr)
-	c.Conns = 1
+	c.Conns = conns
 	c.DisableCompression = true
 	c.Start()
 	return c
+}
+
+func randomData(n int) []byte {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = byte(rand.Uint32())
+	}
+	return b
 }
 
 func TestEncoding(t *testing.T) {
@@ -127,35 +137,75 @@ func TestEncoding(t *testing.T) {
 	}()
 	defer server.Stop()
 
-	addr := server.Listener.ListenAddr()
-	fmt.Println("server listen on", addr)
-	client := NewClient(addr.String())
-	defer client.Stop()
+	addr := server.Listener.ListenAddr().String()
 
-	key := uint64(0x1234567890abcdef)
-	data := []byte("hello world")
-	hash := sum(key, data)
+	eg := &errgroup.Group{}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
 
-	header := RequestHeaders{Key: key}
-	body := iorpc.Body{
-		Size:   uint64(len(data)),
-		Reader: buffer(data),
+	for i := 0; i < 8; i++ {
+		client := NewClient(addr, i)
+		defer client.Stop()
+		for j := 0; j < 20; j++ {
+			eg.Go(func() error {
+				for {
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					default:
+						err := func() error {
+							key := rand.Uint64()
+							data := randomData(1024)
+							hash := sum(key, data)
+
+							req := iorpc.Request{
+								Service: ServiceEcho,
+								Headers: &RequestHeaders{
+									Key: key,
+								},
+								Body: iorpc.Body{
+									Size:   uint64(len(data)),
+									Reader: buffer(data),
+								},
+							}
+							resp, err := client.Call(req)
+							if err != nil {
+								return errors.Wrap(err, "call")
+							}
+							defer resp.Body.Close()
+
+							h, ok := resp.Headers.(*DataHash)
+							if !ok {
+								return errors.New("invalid header")
+							}
+
+							if DataHash(hash) != *h {
+								return fmt.Errorf("invalid hash: %s != %s", hash, *h)
+							}
+
+							respData, err := io.ReadAll(resp.Body.Reader)
+							if err != nil {
+								return errors.Wrap(err, "read body")
+							}
+
+							if !bytes.Equal(respData, hash) {
+								return fmt.Errorf("invalid data: %s != %s", hash, respData)
+							}
+							return nil
+						}()
+
+						if err != nil {
+							return err
+						}
+					}
+				}
+			})
+		}
 	}
 
-	resp, err := client.CallTimeout(iorpc.Request{
-		Service: ServiceEcho,
-		Headers: &header,
-		Body:    body,
-	}, time.Hour)
+	err := eg.Wait()
+	if err == context.DeadlineExceeded {
+		err = nil
+	}
 	a.Nil(err)
-	a.NotNil(resp.Headers)
-	defer resp.Body.Close()
-
-	h, ok := resp.Headers.(*DataHash)
-	a.True(ok)
-	a.Equal(DataHash(hash), *h)
-
-	respData, err := io.ReadAll(resp.Body.Reader)
-	a.Nil(err)
-	a.Equal(hash, respData)
 }
