@@ -74,11 +74,12 @@ func init() {
 
 			hash := sum(header.Key, data)
 			str := DataHash(hash)
+			reader := buffer(hash)
 			return &iorpc.Response{
 				Headers: &str,
 				Body: iorpc.Body{
 					Size:   uint64(len(hash)),
-					Reader: buffer(hash),
+					Reader: &reader,
 				},
 			}, nil
 		},
@@ -97,16 +98,24 @@ func sum(key uint64, data []byte) []byte {
 	return hash[:]
 }
 
-func (b buffer) Iovec() [][]byte {
-	return [][]byte{b}
+func (b *buffer) Iovec() [][]byte {
+	return [][]byte{*b}
 }
 
-func (b buffer) Close() error {
+func (b *buffer) Close() error {
 	return nil
 }
 
-func (b buffer) Read(p []byte) (n int, err error) {
-	n = copy(p, b)
+func (b *buffer) Read(p []byte) (n int, err error) {
+	if len(*b) == 0 {
+		return 0, io.EOF
+	}
+	n = copy(p, *b)
+	if n < len(*b) {
+		*b = (*b)[n:]
+	} else {
+		*b = nil
+	}
 	return
 }
 
@@ -157,6 +166,7 @@ func TestEncoding(t *testing.T) {
 							key := rand.Uint64()
 							data := randomData(1024)
 							hash := sum(key, data)
+							reader := buffer(data)
 
 							req := iorpc.Request{
 								Service: ServiceEcho,
@@ -165,7 +175,7 @@ func TestEncoding(t *testing.T) {
 								},
 								Body: iorpc.Body{
 									Size:   uint64(len(data)),
-									Reader: buffer(data),
+									Reader: &reader,
 								},
 							}
 							resp, err := client.Call(req)

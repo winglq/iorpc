@@ -100,11 +100,9 @@ func PipeConn(r IsConn, size int) (IsPipe, error) {
 	loaded := 0
 	var loadError error
 
-	// buffer := make([]byte, size)
 	err = rawConn.Read(func(fd uintptr) (done bool) {
 		var n int
 		n, loadError = pair.LoadFrom(fd, size-loaded, splice.SPLICE_F_NONBLOCK|splice.SPLICE_F_MOVE)
-		// n, loadError = syscall.Read(int(fd), buffer[loaded:])
 		if loadError != nil {
 			return loadError != syscall.EAGAIN && loadError != syscall.EINTR
 		}
@@ -131,10 +129,16 @@ func PipeBuffer(r IsBuffer, size int) (IsPipe, error) {
 		return nil, errors.Wrap(err, "grow pipe pair")
 	}
 
-	_, err = pair.LoadBuffer(r.Iovec(), size, splice.SPLICE_F_GIFT)
-	if err != nil {
-		return nil, errors.Wrap(err, "pair load buffer")
+	for _, slice := range r.Iovec() {
+		// TODO: use vmsplice to load buffer
+		// There is a bug in vmsplice, it will cause data corruption
+		// _, err = pair.LoadBuffer(r.Iovec(), size, splice.SPLICE_F_GIFT)
+		_, err = syscall.Write(int(pair.WriteFd()), slice)
+		if err != nil {
+			return nil, errors.Wrap(err, "pair load buffer")
+		}
 	}
+
 	return &Pipe{pair: pair}, nil
 }
 
@@ -175,6 +179,7 @@ func (b *Body) spliceTo(w io.Writer) (bool, error) {
 		return false, nil
 	}
 
+	flags := splice.SPLICE_F_NONBLOCK | splice.SPLICE_F_MOVE
 	var pipe IsPipe
 	switch reader := b.Reader.(type) {
 	case IsPipe:
@@ -199,7 +204,7 @@ func (b *Body) spliceTo(w io.Writer) (bool, error) {
 	var writeError error
 	err = dstRawConn.Write(func(fd uintptr) (done bool) {
 		var n int
-		n, writeError = pipe.WriteTo(fd, int(b.Size-written), splice.SPLICE_F_NONBLOCK|splice.SPLICE_F_MOVE)
+		n, writeError = pipe.WriteTo(fd, int(b.Size-written), flags)
 		if writeError != nil {
 			return writeError != syscall.EAGAIN && writeError != syscall.EINTR
 		}
