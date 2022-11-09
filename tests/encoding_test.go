@@ -143,7 +143,7 @@ func TestEncoding(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	for i := 0; i < 8; i++ {
+	for i := 1; i < 8; i++ {
 		client := NewClient(addr, i)
 		defer client.Stop()
 		for j := 0; j < 20; j++ {
