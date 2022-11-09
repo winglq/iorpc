@@ -3,3 +3,5 @@ tags
 *.test
 
 go.sum
+
+tests/tmp
