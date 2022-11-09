@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"io"
 	"reflect"
+	"sync"
 
 	"github.com/pkg/errors"
 )
@@ -73,17 +74,16 @@ type messageEncoder struct {
 	w            io.Writer
 	headerBuffer Buffer
 	stat         *ConnStats
+	bufferLock   sync.Locker
 }
 
 func (e *messageEncoder) Close() error {
+	e.bufferLock.Lock()
+	defer e.bufferLock.Unlock()
 	return e.headerBuffer.Close()
 }
 
-func (e *messageEncoder) Flush() error {
-	if len(e.headerBuffer.Bytes()) == 0 {
-		return nil
-	}
-
+func (e *messageEncoder) flush() error {
 	defer e.headerBuffer.Reset()
 	n, err := io.Copy(e.w, e.headerBuffer)
 	if err != nil {
@@ -91,6 +91,21 @@ func (e *messageEncoder) Flush() error {
 		return errors.Wrap(err, "flush encoder")
 	}
 	e.stat.addHeadWritten(uint64(n))
+	return nil
+}
+
+func (e *messageEncoder) Flush() error {
+	return e.IfAndFlush(func(e *messageEncoder) bool {
+		return len(e.headerBuffer.Bytes()) > 0
+	})
+}
+
+func (e *messageEncoder) IfAndFlush(condition func(e *messageEncoder) bool) error {
+	e.bufferLock.Lock()
+	defer e.bufferLock.Unlock()
+	if condition(e) {
+		return e.flush()
+	}
 	return nil
 }
 
@@ -123,17 +138,12 @@ func (e *messageEncoder) encode(body *Body) error {
 	return nil
 }
 
-func (e *messageEncoder) EncodeRequest(req wireRequest) error {
-	if req.Body.Size > 0 && req.Body.Reader != nil {
-		if err := e.Flush(); err != nil {
-			return err
-		}
-	}
-
+func (e *messageEncoder) encodeRequestHeaders(req wireRequest) error {
+	e.bufferLock.Lock()
+	defer e.bufferLock.Unlock()
 	startLineIndex := len(e.headerBuffer.Bytes())
 	_, err := e.headerBuffer.Write(make([]byte, requestStartLineSize))
 	if err != nil {
-		e.stat.incWriteErrors()
 		return errors.Wrap(err, "write start line placeholder")
 	}
 	startLineBuf := e.headerBuffer.Bytes()[startLineIndex:startLineIndex]
@@ -142,42 +152,46 @@ func (e *messageEncoder) EncodeRequest(req wireRequest) error {
 	headerIndex := indexHeaders(req.Headers)
 	if req.Headers != nil && headerIndex != 0 {
 		if headerSize, err = req.Headers.Encode(e.headerBuffer); err != nil {
-			e.stat.incWriteErrors()
 			return errors.Wrap(err, "encode headers")
 		}
 	}
 
-	if err := binary.Write(bytes.NewBuffer(startLineBuf), binary.BigEndian, requestStartLine{
+	return binary.Write(bytes.NewBuffer(startLineBuf), binary.BigEndian, requestStartLine{
 		ID:         req.ID,
 		Service:    req.Service,
 		HeaderType: headerIndex,
 		HeaderSize: uint32(headerSize),
 		BodySize:   req.Body.Size,
-	}); err != nil {
+	})
+}
+
+func (e *messageEncoder) EncodeRequest(req wireRequest) error {
+	if req.Body.Size > 0 && req.Body.Reader != nil {
+		if err := e.Flush(); err != nil {
+			return err
+		}
+	}
+
+	if err := e.encodeRequestHeaders(req); err != nil {
 		e.stat.incWriteErrors()
 		return err
 	}
 
-	if len(e.headerBuffer.Bytes()) >= headerBufferSize {
-		if err := e.Flush(); err != nil {
-			return err
-		}
+	if err := e.IfAndFlush(func(e *messageEncoder) bool {
+		return len(e.headerBuffer.Bytes()) >= headerBufferSize
+	}); err != nil {
+		return err
 	}
 
 	return e.encode(&req.Body)
 }
 
-func (e *messageEncoder) EncodeResponse(resp wireResponse) error {
-	if resp.Body.Size > 0 && resp.Body.Reader != nil {
-		if err := e.Flush(); err != nil {
-			return err
-		}
-	}
-
+func (e *messageEncoder) encodeResponseHeaders(resp wireResponse) error {
+	e.bufferLock.Lock()
+	defer e.bufferLock.Unlock()
 	startLineIndex := len(e.headerBuffer.Bytes())
 	_, err := e.headerBuffer.Write(make([]byte, responseStartLineSize))
 	if err != nil {
-		e.stat.incWriteErrors()
 		return errors.Wrap(err, "write start line placeholder")
 	}
 	startLineBuf := e.headerBuffer.Bytes()[startLineIndex:startLineIndex]
@@ -186,7 +200,6 @@ func (e *messageEncoder) EncodeResponse(resp wireResponse) error {
 	headerIndex := indexHeaders(resp.Headers)
 	if resp.Headers != nil && headerIndex != 0 {
 		if headerSize, err = resp.Headers.Encode(e.headerBuffer); err != nil {
-			e.stat.incWriteErrors()
 			return errors.Wrap(err, "encode headers")
 		}
 	}
@@ -200,22 +213,34 @@ func (e *messageEncoder) EncodeResponse(resp wireResponse) error {
 		HeaderSize: uint32(headerSize),
 		BodySize:   resp.Body.Size,
 	}); err != nil {
-		e.stat.incWriteErrors()
-		return err
+		return errors.Wrap(err, "write start line")
 	}
 
 	if len(respErr) > 0 {
 		_, err := e.headerBuffer.Write(respErr)
 		if err != nil {
-			e.stat.incWriteErrors()
 			return errors.Wrap(err, "write respError")
 		}
 	}
+	return nil
+}
 
-	if len(e.headerBuffer.Bytes()) >= headerBufferSize {
+func (e *messageEncoder) EncodeResponse(resp wireResponse) error {
+	if resp.Body.Size > 0 && resp.Body.Reader != nil {
 		if err := e.Flush(); err != nil {
 			return err
 		}
+	}
+
+	if err := e.encodeResponseHeaders(resp); err != nil {
+		e.stat.incWriteErrors()
+		return err
+	}
+
+	if err := e.IfAndFlush(func(e *messageEncoder) bool {
+		return len(e.headerBuffer.Bytes()) >= headerBufferSize
+	}); err != nil {
+		return err
 	}
 
 	return e.encode(&resp.Body)
@@ -226,6 +251,7 @@ func newMessageEncoder(w io.Writer, s *ConnStats) *messageEncoder {
 		w:            w,
 		headerBuffer: bufferAllocator(headerBufferSize),
 		stat:         s,
+		bufferLock:   &sync.Mutex{},
 	}
 }
 
