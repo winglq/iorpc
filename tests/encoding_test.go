@@ -33,7 +33,7 @@ type RequestHeaders struct {
 	Key uint64
 }
 
-type DataHash []byte
+type DataHash [16]byte
 
 type File struct {
 	file *os.File
@@ -48,13 +48,16 @@ func (h *RequestHeaders) Decode(data []byte) error {
 }
 
 func (h *DataHash) Encode(w io.Writer) (int, error) {
-	data := []byte(*h)
-	n, err := w.Write(data)
+	n, err := w.Write((*h)[:])
 	return n, err
 }
 
 func (h *DataHash) Decode(data []byte) error {
-	*h = DataHash(data)
+	*h = [16]byte{}
+	n := copy((*h)[:], data)
+	if n != 16 {
+		return errors.New("invalid hash")
+	}
 	return nil
 }
 
@@ -94,7 +97,7 @@ func init() {
 
 			hash := sum(header.Key, data)
 			sig := DataHash(hash)
-			reader := buffer(hash)
+			reader := buffer(hash[:])
 			return &iorpc.Response{
 				Headers: &sig,
 				Body: iorpc.Body{
@@ -146,11 +149,10 @@ func NewServer() *iorpc.Server {
 	return server
 }
 
-func sum(key uint64, data []byte) []byte {
+func sum(key uint64, data []byte) [16]byte {
 	copied := make([]byte, len(data), len(data)+binary.Size(key))
 	copy(copied, data)
-	hash := md5.Sum(binary.AppendUvarint(copied, key))
-	return hash[:]
+	return md5.Sum(binary.AppendUvarint(copied, key))
 }
 
 func (b *buffer) Iovec() [][]byte {
@@ -207,10 +209,10 @@ func TestEncoding(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	for i := 1; i < 2; i++ {
+	for i := 1; i < 8; i++ {
 		client := NewClient(addr, i)
 		defer client.Stop()
-		for j := 0; j < 20; j++ {
+		for j := 0; j < 40; j++ {
 			eg.Go(testEcho(ctx, client))
 			eg.Go(testFile(ctx, client))
 		}
@@ -257,8 +259,8 @@ func testEcho(ctx context.Context, client *iorpc.Client) func() error {
 						return errors.New("invalid header")
 					}
 
-					if !bytes.Equal(*h, hash) {
-						return fmt.Errorf("invalid hash: %s != %s", hash, *h)
+					if *h != hash {
+						return fmt.Errorf("invalid hash: %x != %x", hash, *h)
 					}
 
 					respData, err := io.ReadAll(resp.Body.Reader)
@@ -266,14 +268,14 @@ func testEcho(ctx context.Context, client *iorpc.Client) func() error {
 						return errors.Wrap(err, "read body")
 					}
 
-					if !bytes.Equal(respData, hash) {
+					if !bytes.Equal(respData, hash[:]) {
 						return fmt.Errorf("invalid data: %s != %s", hash, respData)
 					}
 					return nil
 				}()
 
 				if err != nil {
-					return err
+					return errors.Wrap(err, "echo service")
 				}
 			}
 		}
@@ -312,14 +314,14 @@ func testFile(ctx context.Context, client *iorpc.Client) func() error {
 						return errors.New("invalid header")
 					}
 
-					if !bytes.Equal(*h, hash) {
+					if *h != hash {
 						return fmt.Errorf("invalid data: %x != %x", *h, hash)
 					}
 					return nil
 				}()
 
 				if err != nil {
-					return err
+					return errors.Wrap(err, "file service")
 				}
 			}
 		}
