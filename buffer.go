@@ -161,7 +161,7 @@ func (b *ringBuffer) write(p []byte) (int, error) {
 		return len(p), nil
 	}
 
-	n := copy(b.buf[b.start:], p)
+	n := copy(b.buf[b.start+b.size:], p)
 	if len(p) > n {
 		n += copy(b.buf, p[n:])
 	}

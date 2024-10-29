@@ -31,3 +31,56 @@ func TestRingBuffer(t *testing.T) {
 	a.Equal(int64(0), buf.Size())
 	a.Equal(int64(len(data)), buf.Capacity())
 }
+
+func TestWriteInCapacity(t *testing.T) {
+	a := assert.New(t)
+	buf := newRingBuffer(1024)
+	data := []byte("hello ")
+	buf.Write(data)
+	data = []byte("world")
+	n, err := buf.Write(data)
+	a.Equal(n, 5)
+	a.Nil(err)
+	data = make([]byte, 11)
+	n, err = buf.Read(data)
+	a.Equal(n, 11)
+	a.Nil(err)
+	a.Equal(string(data), "hello world")
+	a.Equal(buf.Size(), int64(0))
+	a.Equal(buf.Capacity(), int64(1024))
+}
+
+func TestWriteExpandCapapcity(t *testing.T) {
+	a := assert.New(t)
+	buf := newRingBuffer(8)
+	data := []byte("hello ")
+	buf.Write(data)
+	data = []byte("world")
+	n, err := buf.Write(data)
+	a.Equal(n, 5)
+	a.Nil(err)
+	data = make([]byte, 11)
+	n, err = buf.Read(data)
+	a.Equal(n, 11)
+	a.Nil(err)
+	a.Equal(string(data), "hello world")
+	a.Equal(buf.Size(), int64(0))
+	a.Equal(buf.Capacity(), int64(11))
+}
+
+func TestWriteRound(t *testing.T) {
+	a := assert.New(t)
+	buf := newRingBuffer(8)
+	data := []byte("hello ")
+	buf.Write(data)
+	buf.Read(data)
+	a.Equal(buf.Size(), int64(0))
+	data = []byte("world")
+	n, err := buf.Write(data)
+	a.Equal(n, 5)
+	a.Nil(err)
+	a.Equal(buf.Capacity(), int64(8))
+	d := make([]byte, 5)
+	buf.Read(d[:])
+	a.Equal(string(d), "world")
+}
