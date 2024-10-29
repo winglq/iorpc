@@ -56,7 +56,7 @@ func PipeFile(r IsFile, offset int64, size int) (IsPipe, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "get pipe pair")
 	}
-	err = pair.Grow(alignSize(size))
+	err = pair.Grow(alignSize(size) * 2)
 	if err != nil {
 		return nil, errors.Wrap(err, "grow pipe pair")
 	}
@@ -77,7 +77,7 @@ func PipeConn(r IsConn, size int) (IsPipe, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "get pipe pair")
 	}
-	err = pair.Grow(alignSize(size))
+	err = pair.Grow(alignSize(size) * 2)
 	if err != nil {
 		return nil, errors.Wrap(err, "grow pipe pair")
 	}
@@ -93,13 +93,23 @@ func PipeConn(r IsConn, size int) (IsPipe, error) {
 	// buffer := make([]byte, size)
 	err = rawConn.Read(func(fd uintptr) (done bool) {
 		var n int
-		n, loadError = pair.LoadFrom(fd, size-loaded, splice.SPLICE_F_NONBLOCK|splice.SPLICE_F_MOVE)
-		// n, loadError = syscall.Read(int(fd), buffer[loaded:])
-		if loadError != nil {
-			return loadError != syscall.EAGAIN && loadError != syscall.EINTR
+		for loaded != size {
+			n, loadError = pair.LoadFrom(fd, size-loaded, splice.SPLICE_F_NONBLOCK)
+			// n, loadError = syscall.Read(int(fd), buffer[loaded:])
+			if loadError == syscall.EINTR {
+				continue
+			}
+			if n > 0 {
+				loaded += n
+				continue
+			}
+			if loadError != syscall.EAGAIN {
+				return true
+			}
+			// eagain
+			return false
 		}
-		loaded += n
-		return loaded == size
+		return true
 	})
 
 	if err == nil {
@@ -116,7 +126,7 @@ func PipeBuffer(r IsBuffer, size int) (IsPipe, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "get pipe pair")
 	}
-	err = pair.Grow(alignSize(size))
+	err = pair.Grow(alignSize(size) * 2)
 	if err != nil {
 		return nil, errors.Wrap(err, "grow pipe pair")
 	}
@@ -196,12 +206,22 @@ func (b *Body) spliceTo(w io.Writer) (bool, error) {
 	var writeError error
 	err = dstRawConn.Write(func(fd uintptr) (done bool) {
 		var n int
-		n, writeError = pipe.WriteTo(fd, int(b.Size-written), splice.SPLICE_F_NONBLOCK|splice.SPLICE_F_MOVE)
-		if writeError != nil {
-			return writeError != syscall.EAGAIN && writeError != syscall.EINTR
+		for written != b.Size {
+			n, writeError = pipe.WriteTo(fd, int(b.Size-written), splice.SPLICE_F_NONBLOCK|splice.SPLICE_F_MOVE)
+			if writeError == syscall.EINTR {
+				continue
+			}
+			if n > 0 {
+				written += uint64(n)
+				continue
+			}
+			if writeError != syscall.EAGAIN {
+				return true
+			}
+			// EAGAIN
+			return false
 		}
-		written += uint64(n)
-		return written == b.Size
+		return true
 	})
 	if err == nil {
 		err = writeError
