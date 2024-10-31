@@ -246,6 +246,19 @@ func (d *messageDecoder) Close() error {
 	return d.headerBuffer.Close()
 }
 
+func (d *messageDecoder) spliceBody(size int64) (IsPipe, error) {
+	if size == 0 {
+		return nil, nil
+	}
+
+	r, ok := d.r.(IsConn)
+	if !ok {
+		return nil, nil
+	}
+
+	return PipeConn(r, int(size))
+}
+
 func (d *messageDecoder) decodeBody(size int64) (body io.ReadCloser, err error) {
 	defer func() {
 		if body != nil && d.closeBody {
@@ -255,6 +268,12 @@ func (d *messageDecoder) decodeBody(size int64) (body io.ReadCloser, err error) 
 
 	if size == 0 {
 		return noopBody{}, nil
+	}
+
+	body, _ = d.spliceBody(size) // ignore error
+	if body != nil {
+		d.stat.addBodyRead(uint64(size))
+		return
 	}
 
 	buf := bufferAllocator(int(size))
