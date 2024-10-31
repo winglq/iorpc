@@ -9,7 +9,7 @@ import (
 var (
 	dialer = &net.Dialer{
 		Timeout:   10 * time.Second,
-		KeepAlive: 30 * time.Second,
+		KeepAlive: 1 * time.Second,
 	}
 )
 
